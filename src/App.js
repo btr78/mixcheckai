@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 
+
 // ─────────────────────────────────────────────────────────
 // 🔑 PASTE YOUR STRIPE PAYMENT LINK HERE WHEN READY
 const STRIPE_PAYMENT_LINK = “YOUR_STRIPE_PAYMENT_LINK_HERE”;
