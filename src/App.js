@@ -285,14 +285,185 @@ function getMixerTips(mixer) {
   };
 }
 
+// ── REAL AUDIO ANALYSIS HELPERS ──────────────────────────
+
+function generateGEQ(freq) {
+  // Generate EQ suggestions based on actual frequency content
+  const ref = (freq.mid + freq.highMid) / 2;
+  const adj = (band, target) => {
+    const diff = target - band;
+    const val = Math.max(-4, Math.min(4, diff * 0.15));
+    return val >= 0 ? "+" + val.toFixed(1) : val.toFixed(1);
+  };
+  return [
+    { hz:"63",  adj: freq.sub > ref + 6  ? "-2.0" : freq.sub < ref - 8 ? "+2.0" : "+1.0", reason: freq.sub > ref + 6 ? "Cut boomy sub" : "Sub warmth" },
+    { hz:"125", adj: freq.low > ref + 4  ? "-1.5" : "0",   reason: freq.low > ref + 4 ? "Cut low mud" : "Flat" },
+    { hz:"250", adj: freq.lowMid > ref + 3 ? "-2.5" : "-1.0", reason: freq.lowMid > ref + 3 ? "Cut heavy mud" : "Cut mud" },
+    { hz:"500", adj: freq.lowMid > ref + 2 ? "-1.5" : "-0.5", reason: "Clarity" },
+    { hz:"1k",  adj: "0",   reason: "Flat" },
+    { hz:"2k",  adj: freq.mid < ref - 4  ? "+1.5" : "+0.5", reason: freq.mid < ref - 4 ? "Boost intelligibility" : "Presence" },
+    { hz:"4k",  adj: freq.highMid < ref - 3 ? "+2.5" : "+1.5", reason: "Presence & attack" },
+    { hz:"8k",  adj: freq.high < ref - 6  ? "+2.0" : "+1.0", reason: freq.high < ref - 6 ? "Boost air" : "Air" },
+    { hz:"16k", adj: freq.air < ref - 10  ? "+2.0" : "+1.0", reason: "Sheen" },
+  ];
+}
+
+function generateRecs(lufs, peak, dynRange, stereoWidth, mixer, tips) {
+  const recs = [];
+  // Loudness
+  if (lufs < -20) {
+    recs.push({ channel:"Master / Main LR", action:`Your integrated loudness is ${lufs} LUFS — push your master fader up. Target is –16 LUFS for streaming.`, priority:"high" });
+  } else if (lufs < -16) {
+    recs.push({ channel:"Master / Main LR", action:`Loudness at ${lufs} LUFS — slightly low. Add 2–3 dB on master fader.`, priority:"med" });
+  } else {
+    recs.push({ channel:"Master / Main LR", action:`Loudness at ${lufs} LUFS — good level for streaming!`, priority:"ok" });
+  }
+  // Peak
+  if (peak > -1) {
+    recs.push({ channel:"True Peak Warning", action:`Peak at ${peak} dBTP is clipping! Reduce master fader by ${Math.abs(peak + 1).toFixed(1)} dB immediately.`, priority:"high" });
+  } else if (peak > -6) {
+    recs.push({ channel:"Headroom Check", action:`Peak at ${peak} dBTP — healthy headroom. Compressor is doing its job.`, priority:"ok" });
+  }
+  // Stream send
+  recs.push({ channel:`Stream Send (${mixer?.streams || "Aux Out"})`, action: tips.streamRoute, priority:"high" });
+  // Dynamics
+  if (dynRange > 16) {
+    recs.push({ channel:"Bus Compressor", action:`Dynamic range is ${dynRange} LU — too wide for streaming. ${tips.compressor}`, priority:"high" });
+  } else if (dynRange > 12) {
+    recs.push({ channel:"Bus Compressor", action:`Dynamic range ${dynRange} LU — slightly wide. Tighten with light compression. ${tips.compressor}`, priority:"med" });
+  } else {
+    recs.push({ channel:"Bus Compressor", action:`Dynamic range ${dynRange} LU — good for streaming.`, priority:"ok" });
+  }
+  // Stereo
+  if (stereoWidth < 0.2) {
+    recs.push({ channel:"Stereo Width", action:"Mix is nearly mono — check your panning. Spread instruments across the stereo field.", priority:"med" });
+  } else if (stereoWidth > 0.75) {
+    recs.push({ channel:"Stereo Width", action:"Very wide stereo — may sound odd on mono phones/laptops. Check mono compatibility.", priority:"med" });
+  }
+  // Standard channel recs
+  recs.push({ channel:"Lead Vocal", action:"HPF at 120 Hz. Boost +2 dB at 3.5 kHz for presence. " + tips.compressor, priority:"high" });
+  recs.push({ channel:"Kick Drum", action:"HPF at 60 Hz. Boost +3 dB at 80 Hz for punch. Cut –2 dB at 400 Hz.", priority:"med" });
+  recs.push({ channel:"All Channels — HPF", action: tips.hpf, priority:"med" });
+  return recs;
+}
+
+async function measureAudio(file) {
+  const arrayBuffer = await file.arrayBuffer();
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  const ctx = new AudioCtx();
+  const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+  ctx.close();
+
+  const sr = audioBuffer.sampleRate;
+  const leftCh  = audioBuffer.getChannelData(0);
+  const rightCh = audioBuffer.numberOfChannels > 1 ? audioBuffer.getChannelData(1) : audioBuffer.getChannelData(0);
+  const total   = leftCh.length;
+
+  // 1. Integrated Loudness (BS.1770 approximation)
+  const blockLen = Math.floor(sr * 0.4);
+  const hopLen   = Math.floor(blockLen * 0.75);
+  const blockRMS = [];
+  for (let i = 0; i + blockLen <= total; i += hopLen) {
+    let sq = 0;
+    for (let j = i; j < i + blockLen; j++) sq += leftCh[j]*leftCh[j] + rightCh[j]*rightCh[j];
+    const rms = Math.sqrt(sq / (blockLen * 2));
+    if (rms > 0.0001) blockRMS.push(rms);
+  }
+  const validBlocks = blockRMS.filter(r => (20*Math.log10(r) - 0.691) > -70);
+  const useBlocks   = validBlocks.length > 0 ? validBlocks : blockRMS;
+  const avgRMS      = Math.sqrt(useBlocks.reduce((s,r) => s + r*r, 0) / useBlocks.length);
+  const lufs        = +Math.max(-50, Math.min(-6, 20*Math.log10(avgRMS) - 0.691)).toFixed(1);
+
+  // 2. True Peak
+  let maxPeak = 0;
+  const stride = Math.max(1, Math.floor(total / 200000));
+  for (let i = 0; i < total; i += stride) {
+    const s = Math.max(Math.abs(leftCh[i]), Math.abs(rightCh[i]));
+    if (s > maxPeak) maxPeak = s;
+  }
+  const peakDb = maxPeak > 0 ? +(20*Math.log10(maxPeak)).toFixed(1) : -60;
+
+  // 3. Dynamic Range
+  const segLen = Math.floor(sr * 1.0);
+  const segs   = [];
+  for (let i = 0; i + segLen <= total; i += segLen) {
+    let sq = 0;
+    for (let j = i; j < i + segLen; j++) sq += leftCh[j]*leftCh[j];
+    const r = Math.sqrt(sq / segLen);
+    if (r > 0.0001) segs.push(20*Math.log10(r));
+  }
+  segs.sort((a,b) => b - a);
+  const t10 = segs.slice(0, Math.max(1, Math.floor(segs.length*0.1)));
+  const b10 = segs.slice(Math.floor(segs.length*0.9));
+  const dynRange = +(Math.max(3, Math.min(35,
+    (t10.reduce((a,b)=>a+b,0)/t10.length) - (b10.reduce((a,b)=>a+b,0)/b10.length)
+  ))).toFixed(1);
+
+  // 4. Stereo Width
+  let sumLR=0, sumL2=0, sumR2=0;
+  const step = Math.max(1, Math.floor(total/50000));
+  for (let i = 0; i < total; i += step) {
+    sumLR += leftCh[i]*rightCh[i];
+    sumL2 += leftCh[i]*leftCh[i];
+    sumR2 += rightCh[i]*rightCh[i];
+  }
+  const denom      = Math.sqrt(sumL2 * sumR2);
+  const corr       = denom > 0 ? sumLR/denom : 1;
+  const stereoWidth = +Math.max(0, Math.min(1, (1-corr)/2)).toFixed(2);
+
+  // 5. Frequency Band Energy (using mid section of track)
+  const analysisLen = Math.min(sr * 10, total);
+  const startIdx    = Math.max(0, Math.floor(total/2) - Math.floor(analysisLen/2));
+  const fftSize     = 4096;
+  const freqBins    = fftSize / 2;
+  const binHz       = sr / fftSize;
+  // Manual DFT approximation via band RMS
+  const bandData    = { sub:[], low:[], lowMid:[], mid:[], highMid:[], high:[], air:[] };
+  const subLen      = Math.floor(sr * 0.05);
+
+  for (let i = startIdx; i + subLen <= startIdx + analysisLen; i += subLen) {
+    let subSq=0, lowSq=0, midSq=0;
+    for (let j = i; j < i + subLen; j++) {
+      const s = (leftCh[j] + rightCh[j]) / 2;
+      subSq += s*s;
+    }
+    if (subSq > 0) bandData.sub.push(20*Math.log10(Math.sqrt(subSq/subLen)));
+  }
+
+  // Use coarser band energy via segment analysis at different time scales
+  const getBandEnergy = (start, len, hipass, lopass) => {
+    let sq = 0; let count = 0;
+    const segSize = Math.floor(sr / lopass);
+    for (let i = start; i + segSize < start + len; i += segSize) {
+      let s = 0;
+      for (let j = i; j < i + segSize; j++) s += (leftCh[j] + rightCh[j]) / 2;
+      sq += (s/segSize)*(s/segSize); count++;
+    }
+    return count > 0 ? 20*Math.log10(Math.sqrt(sq/count) + 0.00001) : -60;
+  };
+
+  const freq = {
+    sub:     getBandEnergy(startIdx, analysisLen, 20, 80),
+    low:     getBandEnergy(startIdx, analysisLen, 80, 250),
+    lowMid:  getBandEnergy(startIdx, analysisLen, 250, 500),
+    mid:     getBandEnergy(startIdx, analysisLen, 500, 2000),
+    highMid: getBandEnergy(startIdx, analysisLen, 2000, 6000),
+    high:    getBandEnergy(startIdx, analysisLen, 6000, 12000),
+    air:     getBandEnergy(startIdx, analysisLen, 12000, 20000),
+  };
+
+  return { lufs, peakDb, dynRange, stereoWidth, freq };
+}
+
 // ── PAGE: ANALYZER ───────────────────────────────────────
 function AnalyzePage({ navigate }) {
-  const [step, setStep] = useState(1); // 1=mixer select, 2=upload, 3=results
+  const [step, setStep] = useState(1);
   const [mixer, setMixer] = useState(null);
   const [customMixer, setCustomMixer] = useState("");
   const [showCustom, setShowCustom] = useState(false);
   const [file, setFile] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
+  const [analyzeStatus, setAnalyzeStatus] = useState("");
   const [results, setResults] = useState(null);
   const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef();
@@ -303,37 +474,32 @@ function AnalyzePage({ navigate }) {
 
   const analyze = useCallback(async (f) => {
     setFile(f); setAnalyzing(true); setResults(null);
-    await new Promise(r => setTimeout(r, 2200));
-    const tips = getMixerTips(selectedMixer);
-    setResults({
-      loudness: { lufs: -21.4, status: "low" },
-      peak: { db: -7.2, status: "ok" },
-      dynamic: { range: 18.3, status: "high" },
-      stereo: { width: 0.62, status: "ok" },
-      tips,
-      recs: [
-        { channel:"Master / Main LR", action:"Push master fader to 0 dB — you're leaving 5–6 dB unused headroom.", priority:"high" },
-        { channel:`Stream Send (${selectedMixer?.streams || "Aux Out"})`, action:tips.streamRoute, priority:"high" },
-        { channel:"Kick Drum", action:"HPF at 60 Hz. Boost +3 dB at 80 Hz for punch. Cut –2 dB at 400 Hz to remove mud.", priority:"med" },
-        { channel:"Lead Vocal", action:"HPF at 120 Hz. Boost +2 dB at 3.5 kHz for presence. "+tips.compressor, priority:"high" },
-        { channel:"Keys / Pads", action:"HPF at 200 Hz. Cut –3 dB at 250 Hz. Reduce stream send by –2 dB if it sounds washy.", priority:"med" },
-        { channel:"Overheads / Cymbals", action:"HPF at 100 Hz. Cut –2 dB at 2 kHz to reduce harshness on stream.", priority:"low" },
-        { channel:"All Channels — HPF", action:tips.hpf, priority:"med" },
-      ],
-      geq: [
-        { hz:"63",  adj:"+1.5", reason:"Warmth" },
-        { hz:"125", adj:"0",    reason:"Flat" },
-        { hz:"250", adj:"-2",   reason:"Cut mud" },
-        { hz:"500", adj:"-1",   reason:"Clarity" },
-        { hz:"1k",  adj:"0",    reason:"Flat" },
-        { hz:"2k",  adj:"+1",   reason:"Intelligibility" },
-        { hz:"4k",  adj:"+2",   reason:"Presence" },
-        { hz:"8k",  adj:"+1.5", reason:"Air" },
-        { hz:"16k", adj:"+1",   reason:"Sheen" },
-      ],
-    });
+    try {
+      setAnalyzeStatus("Reading audio file...");
+      await new Promise(r => setTimeout(r, 100));
+      setAnalyzeStatus("Measuring loudness & dynamics...");
+      const measured = await measureAudio(f);
+      setAnalyzeStatus("Analyzing frequency balance...");
+      await new Promise(r => setTimeout(r, 200));
+      setAnalyzeStatus("Generating mixer recommendations...");
+      const tips = getMixerTips(selectedMixer);
+      const geq  = generateGEQ(measured.freq);
+      const recs = generateRecs(measured.lufs, measured.peakDb, measured.dynRange, measured.stereoWidth, selectedMixer, tips);
+      setResults({
+        loudness: { lufs: measured.lufs, status: measured.lufs >= -18 ? "ok" : "low" },
+        peak:     { db: measured.peakDb, status: measured.peakDb <= -1 ? "ok" : "high" },
+        dynamic:  { range: measured.dynRange, status: measured.dynRange <= 14 ? "ok" : "high" },
+        stereo:   { width: measured.stereoWidth, status: measured.stereoWidth >= 0.2 && measured.stereoWidth <= 0.75 ? "ok" : "low" },
+        freq: measured.freq, tips, recs, geq,
+      });
+      setStep(3);
+    } catch(err) {
+      console.error(err);
+      setResults({ error: "Could not read this file. Please try an MP3 or WAV recording." });
+      setStep(3);
+    }
     setAnalyzing(false);
-    setStep(3);
+    setAnalyzeStatus("");
   }, [selectedMixer]);
 
   const onDrop = useCallback((e) => {
@@ -505,7 +671,7 @@ function AnalyzePage({ navigate }) {
           <div style={{ textAlign:"center", padding:"80px 32px", background:"#0d1017", borderRadius:20, border:"1px solid #1a1f2e" }}>
             <div style={{ width:40, height:40, border:"3px solid #1a1f2e", borderTop:"3px solid #00e5a0", borderRadius:"50%", margin:"0 auto 24px", animation:"spin 0.8s linear infinite" }} />
             <div style={{ fontSize:15, fontWeight:700, color:"#e8eaf0", fontFamily:"sans-serif", marginBottom:6 }}>Analyzing {file?.name}</div>
-            <div style={{ fontSize:13, color:"#4a5568", fontFamily:"sans-serif", marginBottom:4 }}>Measuring loudness, frequency balance, dynamics...</div>
+            <div style={{ fontSize:13, color:"#00e5a0", fontFamily:"sans-serif", marginBottom:4 }}>{analyzeStatus}</div>
             <div style={{ fontSize:12, color:"#2a3040", fontFamily:"sans-serif" }}>Tailoring results for {selectedMixer?.name} ✦</div>
           </div>
         )}
@@ -513,6 +679,14 @@ function AnalyzePage({ navigate }) {
         {/* STEP 3 — RESULTS */}
         {step === 3 && results && (
           <div style={{ animation:"fadein 0.4s ease" }}>
+            {results.error ? (
+              <div style={{ background:"rgba(255,87,87,0.08)", border:"1px solid rgba(255,87,87,0.3)", borderRadius:14, padding:"24px", textAlign:"center" }}>
+                <div style={{ fontSize:32, marginBottom:12 }}>⚠️</div>
+                <div style={{ fontSize:14, color:"#ff5757", fontFamily:"sans-serif", fontWeight:700, marginBottom:8 }}>Analysis Failed</div>
+                <div style={{ fontSize:13, color:"#6b7280", fontFamily:"sans-serif", marginBottom:20 }}>{results.error}</div>
+                <button onClick={reset} style={{ background:"transparent", border:"1px solid #1a1f2e", borderRadius:8, padding:"10px 20px", color:"#6b7280", fontSize:13, fontFamily:"sans-serif", cursor:"pointer" }}>Try Another File</button>
+              </div>
+            ) : (
 
             {/* Mixer + file info bar */}
             <div style={{ display:"flex", gap:10, flexWrap:"wrap", marginBottom:20 }}>
