@@ -462,13 +462,13 @@ ${results.recs.map(r => `<div class="rec ${r.priority}"><div class="rec-title">$
 
 <div class="section-title">Frequency Analysis</div>
 ${[
-  ["Sub Bass 20-80 Hz", results.freq.sub],
-  ["Low Bass 80-250 Hz", results.freq.low],
-  ["Low Mids 250-600 Hz", results.freq.lowMid],
-  ["Mids 600Hz-2.5kHz", results.freq.mid],
-  ["Upper Mids 2.5-7kHz", results.freq.highMid],
-  ["Highs 7-14kHz", results.freq.high],
-  ["Air 14-20kHz", results.freq.air],
+  ["Sub Bass 20-80 Hz", results.freq ? results.freq.sub : "N/A"],
+  ["Low Bass 80-250 Hz", results.freq ? results.freq.low : "N/A"],
+  ["Low Mids 250-600 Hz", results.freq ? results.freq.lowMid : "N/A"],
+  ["Mids 600Hz-2.5kHz", results.freq ? results.freq.mid : "N/A"],
+  ["Upper Mids 2.5-7kHz", results.freq ? results.freq.highMid : "N/A"],
+  ["Highs 7-14kHz", results.freq ? results.freq.high : "N/A"],
+  ["Air 14-20kHz", results.freq ? results.freq.air : "N/A"],
 ].map(([name,val]) => `<div class="freq-item"><span>${name}</span><span>${Math.round(val)} dB relative</span></div>`).join("")}
 
 <div class="section-title">File Info</div>
@@ -560,11 +560,11 @@ function AnalyzePage({ navigate, isPro, onUnlockClick }) {
       await new Promise(r => setTimeout(r, 100));
       setAnalyzeStatus("Generating recommendations...");
       const recs = generateGeneralRecs(
-        m.lufs ?? -20,
-        m.peakDb ?? -6,
-        m.dynRange ?? 12,
-        m.stereoWidth ?? 50,
-        m.freq ?? { sub:-40, low:-40, lowMid:-40, mid:-40, highMid:-40, high:-40, air:-40 }
+        (m.lufs !== undefined && m.lufs !== null ? m.lufs : -20),
+        (m.peakDb !== undefined && m.peakDb !== null ? m.peakDb : -6),
+        (m.dynRange !== undefined && m.dynRange !== null ? m.dynRange : 12),
+        (m.stereoWidth !== undefined && m.stereoWidth !== null ? m.stereoWidth : 50),
+        (m.freq || { sub:-40, low:-40, lowMid:-40, mid:-40, highMid:-40, high:-40, air:-40 })
       );
       setResults({ ...m, recs, mixer: selectedMixer });
       setStep(3);
@@ -615,7 +615,7 @@ function AnalyzePage({ navigate, isPro, onUnlockClick }) {
                 <div style={{ fontSize:10, letterSpacing:3, color:"#4a5568", fontFamily:"monospace", fontWeight:700, marginBottom:10 }}>{g.label.toUpperCase()}</div>
                 <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))", gap:8 }}>
                   {g.mixers.map(m => (
-                    <button key={m.id} onClick={() => { setMixer(m); setShowCustom(false); setStep(2); }} style={{ background: mixer?.id===m.id ? "rgba(0,229,160,0.1)" : "#0d1017", border: mixer?.id===m.id ? "1.5px solid #00e5a0" : "1px solid #1a1f2e", borderRadius:10, padding:"12px 10px", cursor:"pointer", textAlign:"left" }}>
+                    <button key={m.id} onClick={() => { setMixer(m); setShowCustom(false); setStep(2); }} style={{ background: (mixer && mixer.id===m.id) ? "rgba(0,229,160,0.1)" : "#0d1017", border: (mixer && mixer.id===m.id) ? "1.5px solid #00e5a0" : "1px solid #1a1f2e", borderRadius:10, padding:"12px 10px", cursor:"pointer", textAlign:"left" }}>
                       <div style={{ fontSize:13, fontWeight:700, color:"#e8eaf0", fontFamily:"sans-serif", marginBottom:4 }}>{m.name}</div>
                       <div style={{ fontSize:9, color: m.type==="digital"?"#4a7cff":"#ffb347", background: m.type==="digital"?"rgba(74,124,255,0.1)":"rgba(255,179,71,0.1)", padding:"2px 6px", borderRadius:4, fontFamily:"monospace", fontWeight:700, display:"inline-block" }}>{m.type.toUpperCase()}</div>
                       <div style={{ fontSize:9, color:"#2a3040", fontFamily:"sans-serif", marginTop:4 }}>{m.streams}</div>
@@ -645,8 +645,8 @@ function AnalyzePage({ navigate, isPro, onUnlockClick }) {
               <div style={{ display:"flex", alignItems:"center", gap:10 }}>
                 <span style={{ fontSize:16 }}>🎛</span>
                 <div>
-                  <div style={{ fontSize:12, fontWeight:700, color:"#00e5a0", fontFamily:"sans-serif" }}>{selectedMixer?.name || "Custom Mixer"}</div>
-                  <div style={{ fontSize:10, color:"#4a5568", fontFamily:"sans-serif" }}>Stream: {selectedMixer?.streams || "Aux Out"}</div>
+                  <div style={{ fontSize:12, fontWeight:700, color:"#00e5a0", fontFamily:"sans-serif" }}>{(selectedMixer && selectedMixer.name ? selectedMixer.name : "Custom Mixer")}</div>
+                  <div style={{ fontSize:10, color:"#4a5568", fontFamily:"sans-serif" }}>Stream: {(selectedMixer && selectedMixer.streams ? selectedMixer.streams : "Aux Out")}</div>
                 </div>
               </div>
               <button onClick={() => setStep(1)} style={{ background:"none", border:"none", color:"#4a5568", fontSize:12, fontFamily:"sans-serif", cursor:"pointer" }}>Change</button>
@@ -679,7 +679,7 @@ function AnalyzePage({ navigate, isPro, onUnlockClick }) {
           <div style={{ textAlign:"center", padding:"80px 32px", background:"#0d1017", borderRadius:20, border:"1px solid #1a1f2e" }}>
             <div style={{ width:40, height:40, border:"3px solid #1a1f2e", borderTop:"3px solid #00e5a0", borderRadius:"50%", margin:"0 auto 24px", animation:"spin 0.8s linear infinite" }} />
             <div style={{ fontSize:15, fontWeight:700, color:"#e8eaf0", fontFamily:"sans-serif", marginBottom:6 }}>{analyzeStatus}</div>
-            <div style={{ fontSize:12, color:"#2a3040", fontFamily:"sans-serif" }}>{file?.name}</div>
+            <div style={{ fontSize:12, color:"#2a3040", fontFamily:"sans-serif" }}>{(file && file.name ? file.name : "")}</div>
           </div>
         )}
 
@@ -698,10 +698,10 @@ function AnalyzePage({ navigate, isPro, onUnlockClick }) {
                 {/* File + mixer badges */}
                 <div style={{ display:"flex", gap:10, flexWrap:"wrap", marginBottom:20 }}>
                   {results.mixer && <div style={{ background:"rgba(0,229,160,0.08)", border:"1px solid rgba(0,229,160,0.2)", borderRadius:8, padding:"6px 14px", fontSize:12, color:"#00e5a0", fontFamily:"sans-serif", fontWeight:600 }}>{results.mixer.name}</div>}
-                  <div style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:8, padding:"6px 14px", fontSize:12, color:"#6b7280", fontFamily:"sans-serif" }}>{file?.name}</div>
+                  <div style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:8, padding:"6px 14px", fontSize:12, color:"#6b7280", fontFamily:"sans-serif" }}>{(file && file.name ? file.name : "")}</div>
                   {results.duration && <div style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:8, padding:"6px 14px", fontSize:12, color:"#6b7280", fontFamily:"sans-serif" }}>{Math.floor(results.duration/60)}m {results.duration%60}s</div>}
                   {isPro && (
-                    <button onClick={() => generatePDF(results, file?.name || "recording")}
+                    <button onClick={() => generatePDF(results, (file && file.name ? file.name : "recording"))}
                       style={{ background:"linear-gradient(135deg,#4a7cff,#7c3aed)", color:"#fff", border:"none", borderRadius:8, padding:"6px 14px", fontSize:12, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer" }}>
                       Download PDF Report
                     </button>
@@ -775,7 +775,7 @@ function AnalyzePage({ navigate, isPro, onUnlockClick }) {
                     Analyze Another File
                   </button>
                   {isPro && (
-                    <button onClick={() => generatePDF(results, file?.name || "recording")}
+                    <button onClick={() => generatePDF(results, (file && file.name ? file.name : "recording"))}
                       style={{ background:"linear-gradient(135deg,#4a7cff,#7c3aed)", color:"#fff", border:"none", borderRadius:10, padding:"11px 22px", fontSize:13, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer" }}>
                       Download PDF Report
                     </button>
