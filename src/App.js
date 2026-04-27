@@ -344,6 +344,113 @@ const MIXER_GROUPS = [
   ]},
 ];
 
+// ── DIAGNOSIS HELPERS ─────────────────────────────────────────────────────────
+function getLufsDiagnosis(lufs) {
+  if (lufs < -24) return { label:"Very Quiet", color:"#ff5757", advice:"Your mix is significantly too quiet for streaming. This is the most important thing to fix." };
+  if (lufs < -20) return { label:"Too Quiet", color:"#ff5757", advice:"Below streaming target. Viewers will struggle to hear it at normal volume." };
+  if (lufs < -18) return { label:"Slightly Quiet", color:"#ffb347", advice:"A little below target. A small gain increase will bring it to the streaming sweet spot." };
+  if (lufs <= -14) return { label:"Good", color:"#00e5a0", advice:"Your loudness is in the ideal range for streaming platforms." };
+  if (lufs <= -10) return { label:"Slightly Loud", color:"#ffb347", advice:"Slightly above target. Consider pulling back your master level a little." };
+  return { label:"Too Loud", color:"#ff5757", advice:"Your mix is very loud and may be clipping on some platforms." };
+}
+function getDynDiagnosis(dr) {
+  if (dr < 4) return { label:"Over-compressed", color:"#ff5757", advice:"Very little dynamic range. The mix may sound flat. Ease off the compression." };
+  if (dr < 8) return { label:"Slightly Compressed", color:"#ffb347", advice:"A little tight but acceptable for live streaming." };
+  if (dr <= 14) return { label:"Good", color:"#00e5a0", advice:"Dynamic range is ideal for streaming. Natural and controlled." };
+  if (dr <= 20) return { label:"Wide", color:"#ffb347", advice:"Quite dynamic. Add gentle compression on the master bus." };
+  return { label:"Very Wide", color:"#ff5757", advice:"Extremely wide. Quiet parts will be inaudible on stream. Compression needed." };
+}
+function getPeakDiagnosis(peak) {
+  if (peak > 0) return { label:"Clipping!", color:"#ff5757", advice:"Clipping causes distortion. Pull master level down immediately." };
+  if (peak > -1) return { label:"Danger Zone", color:"#ff5757", advice:"Dangerously close to clipping. Reduce master level by at least 2 dB." };
+  if (peak > -3) return { label:"A bit hot", color:"#ffb347", advice:"A little high. Pull back 1-2 dB for safer headroom." };
+  if (peak > -6) return { label:"Good", color:"#00e5a0", advice:"Healthy peak level with good headroom." };
+  return { label:"Low", color:"#ffb347", advice:"Peak level is low. You may have room to raise your overall level." };
+}
+function getStereoDiagnosis(sw) {
+  if (sw < 10) return { label:"Nearly Mono", color:"#ffb347", advice:"Very narrow stereo. Try spreading instruments left and right." };
+  if (sw <= 60) return { label:"Good", color:"#00e5a0", advice:"Healthy stereo width. Translates well to speakers and earphones." };
+  if (sw <= 80) return { label:"Wide", color:"#ffb347", advice:"Quite wide. Check mono compatibility on a phone speaker." };
+  return { label:"Very Wide", color:"#ff5757", advice:"Extremely wide. May cause phase issues on mono devices." };
+}
+function getFreqAdvice(freq) {
+  if (!freq) return [{ band:"Frequency Balance", issue:"Unknown", fix:"Could not analyze frequency balance." }];
+  var ref = ((freq.mid || -40) + (freq.highMid || -40)) / 2;
+  var advice = [];
+  if ((freq.sub || -60) > ref + 6) advice.push({ band:"Sub Bass (20-80 Hz)", issue:"Too much", fix:"Cut the sub-bass. Adding boom that wastes headroom on stream." });
+  if ((freq.low || -60) > ref + 5) advice.push({ band:"Low Bass (80-250 Hz)", issue:"Too much", fix:"Cut the low-end. Mix sounds boomy. Apply high-pass filters on channels that do not need bass." });
+  if ((freq.lowMid || -60) > ref + 4) advice.push({ band:"Low Mids (250-600 Hz)", issue:"Muddy", fix:"Cut here. This is the mud zone. Improves clarity and intelligibility significantly." });
+  if ((freq.mid || -60) < ref - 5) advice.push({ band:"Mids (600Hz-2.5kHz)", issue:"Scooped", fix:"The mids are too low. This is where voices live. Boost here for better intelligibility." });
+  if ((freq.highMid || -60) < ref - 5) advice.push({ band:"Upper Mids (2.5-7kHz)", issue:"Dull", fix:"Boost upper mids to add presence and help vocals cut through on stream." });
+  if ((freq.high || -60) < ref - 8) advice.push({ band:"Highs (7-14kHz)", issue:"Dark", fix:"Mix sounds dark or muffled. A gentle high-shelf boost adds air and clarity." });
+  if ((freq.air || -60) < ref - 12) advice.push({ band:"Air (14-20kHz)", issue:"Missing", fix:"Very little high-frequency air. A gentle shelf above 12kHz adds sparkle." });
+  if (advice.length === 0) advice.push({ band:"Overall Frequency Balance", issue:"Good", fix:"Frequency balance looks reasonable. Focus on loudness and dynamics recommendations." });
+  return advice;
+}
+function generateRecs(lufs, peak, dynRange, stereoWidth, freq) {
+  var safeL = isFinite(lufs) ? lufs : -20;
+  var safeP = isFinite(peak) ? peak : -6;
+  var safeD = isFinite(dynRange) ? dynRange : 12;
+  var safeS = isFinite(stereoWidth) ? stereoWidth : 50;
+  var safeF = freq || { sub:-40, low:-40, lowMid:-40, mid:-40, highMid:-40, high:-40, air:-40 };
+  var recs = [];
+  if (safeL < -20) recs.push({ priority:"high", title:"Increase Overall Level", detail:"At " + safeL + " LUFS your mix is too quiet for streaming. Target is -16 LUFS. Gradually increase your master output." });
+  else if (safeL < -17) recs.push({ priority:"med", title:"Slightly Raise Your Level", detail:"At " + safeL + " LUFS you are close to target. Add 1-3 dB on your master output." });
+  else recs.push({ priority:"ok", title:"Good Overall Level", detail:"Loudness at " + safeL + " LUFS is within the ideal streaming range." });
+  if (safeP > -1) recs.push({ priority:"high", title:"Fix Clipping Immediately", detail:"Peaking at " + safeP + " dBTP causes distortion. Reduce master level before anything else." });
+  else if (safeP > -3) recs.push({ priority:"med", title:"Reduce Headroom Risk", detail:"Peak at " + safeP + " dBTP is close to distorting. Pull master down by 2 dB." });
+  if (safeD > 16) recs.push({ priority:"high", title:"Add Compression", detail:"Dynamic range of " + safeD + " LU is too wide for streaming. Add a compressor at 2:1 or 3:1 on your master output." });
+  else if (safeD < 4) recs.push({ priority:"med", title:"Ease Off Compression", detail:"Only " + safeD + " LU of dynamic range. Mix sounds flat. Reduce compression ratio or raise threshold." });
+  else recs.push({ priority:"ok", title:"Good Dynamic Control", detail:"Dynamic range of " + safeD + " LU is healthy for streaming." });
+  if (safeS < 15) recs.push({ priority:"med", title:"Widen Stereo Image", detail:"Mix is nearly mono at " + safeS + "%. Pan instruments left and right for a wider sound." });
+  else if (safeS > 80) recs.push({ priority:"med", title:"Check Mono Compatibility", detail:"Very wide stereo at " + safeS + "%. Test on a phone speaker. If it sounds thin, narrow the stereo width." });
+  var freqAdvice = getFreqAdvice(safeF);
+  for (var fi = 0; fi < freqAdvice.length; fi++) {
+    if (freqAdvice[fi].issue !== "Good") recs.push({ priority:"med", title:freqAdvice[fi].band + " - " + freqAdvice[fi].issue, detail:freqAdvice[fi].fix });
+  }
+  recs.push({ priority:"tip", title:"Dedicated Stream Output", detail:"Always use a dedicated output for your stream, separate from your main house speakers. This lets you control stream level independently." });
+  recs.push({ priority:"tip", title:"High Pass Filter Every Channel", detail:"Apply a high-pass filter on every channel that does not need deep bass. Removes rumble and muddiness that hurts stream quality." });
+  recs.push({ priority:"tip", title:"Phone Speaker Test", detail:"Check your stream on earbuds or a phone speaker before going live. If it sounds good there, it will sound good for most of your audience." });
+  return recs;
+}
+function generatePDF(results, fileName) {
+  var win = window.open("", "_blank");
+  if (!win) { alert("Please allow popups to download the PDF report."); return; }
+  var now = new Date().toLocaleDateString();
+  var ld = getLufsDiagnosis(results.lufs);
+  var dd = getDynDiagnosis(results.dynRange);
+  var pd = getPeakDiagnosis(results.peakDb);
+  var sd = getStereoDiagnosis(results.stereoWidth);
+  var recHTML = results.recs.map(function(r) {
+    return '<div class="rec ' + r.priority + '"><div class="rt">' + r.title + '</div><div class="rd">' + r.detail + '</div></div>';
+  }).join("");
+  var freqRows = results.freq ? [
+    ["Sub Bass 20-80 Hz", Math.round(results.freq.sub)],
+    ["Low Bass 80-250 Hz", Math.round(results.freq.low)],
+    ["Low Mids 250-600 Hz", Math.round(results.freq.lowMid)],
+    ["Mids 600Hz-2.5kHz", Math.round(results.freq.mid)],
+    ["Upper Mids 2.5-7kHz", Math.round(results.freq.highMid)],
+    ["Highs 7-14kHz", Math.round(results.freq.high)],
+    ["Air 14-20kHz", Math.round(results.freq.air)],
+  ] : [];
+  var freqHTML = freqRows.map(function(row) { return '<div class="fi"><span>' + row[0] + '</span><span>' + row[1] + ' dB rel</span></div>'; }).join("");
+  win.document.write('<!DOCTYPE html><html><head><title>MixCheck AI Report</title><style>body{font-family:Arial,sans-serif;max-width:800px;margin:0 auto;padding:40px;color:#111}h1{font-size:28px;margin:0 0 4px}.sub{color:#666;font-size:13px;margin-bottom:32px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:32px}.metric{border:1px solid #e0e0e0;border-radius:10px;padding:16px}.ml{font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#888;margin-bottom:6px}.mv{font-size:26px;font-weight:900;margin-bottom:4px}.ms{font-size:11px;font-weight:700;margin-bottom:6px}.ma{font-size:12px;color:#555;line-height:1.5}.st{font-size:13px;letter-spacing:3px;text-transform:uppercase;color:#00a070;border-bottom:2px solid #00a070;padding-bottom:8px;margin:28px 0 16px}.rec{border-left:3px solid #ccc;padding:10px 14px;margin-bottom:12px;background:#fafafa;border-radius:0 8px 8px 0}.rec.high{border-color:#e33}.rec.med{border-color:#f90}.rec.ok{border-color:#0a0}.rec.tip{border-color:#4a7cff}.rt{font-weight:700;font-size:14px;margin-bottom:4px}.rd{font-size:13px;color:#444;line-height:1.6}.fi{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #eee;font-size:13px}.footer{margin-top:48px;text-align:center;font-size:11px;color:#aaa}</style></head><body>');
+  win.document.write('<h1>MixCheck AI</h1><div class="sub">Audio Analysis Report - ' + now + ' - ' + fileName + '</div>');
+  win.document.write('<div class="grid">');
+  win.document.write('<div class="metric"><div class="ml">Loudness</div><div class="mv">' + results.lufs + ' LUFS</div><div class="ms">Target: -16 LUFS | ' + ld.label + '</div><div class="ma">' + ld.advice + '</div></div>');
+  win.document.write('<div class="metric"><div class="ml">True Peak</div><div class="mv">' + results.peakDb + ' dBTP</div><div class="ms">Below -1 dBTP | ' + pd.label + '</div><div class="ma">' + pd.advice + '</div></div>');
+  win.document.write('<div class="metric"><div class="ml">Dynamic Range</div><div class="mv">' + results.dynRange + ' LU</div><div class="ms">Target: 8-14 LU | ' + dd.label + '</div><div class="ma">' + dd.advice + '</div></div>');
+  win.document.write('<div class="metric"><div class="ml">Stereo Width</div><div class="mv">' + results.stereoWidth + '%</div><div class="ms">Target: 20-75% | ' + sd.label + '</div><div class="ma">' + sd.advice + '</div></div>');
+  win.document.write('</div><div class="st">Recommendations</div>' + recHTML);
+  if (freqHTML) win.document.write('<div class="st">Frequency Balance</div>' + freqHTML);
+  win.document.write('<div class="st">File Info</div>');
+  win.document.write('<div class="fi"><span>Duration</span><span>' + Math.floor(results.duration/60) + 'm ' + (results.duration%60) + 's</span></div>');
+  win.document.write('<div class="fi"><span>Channels</span><span>' + (results.channels === 1 ? "Mono" : "Stereo") + '</span></div>');
+  win.document.write('<div class="footer">MixCheck AI - mixcheckai.com - ' + now + '</div></body></html>');
+  win.document.close();
+  setTimeout(function() { win.print(); }, 500);
+}
+
 function AnalyzePage({ navigate, isPro, onUnlockClick }) {
   var stepState = useState(1); var step = stepState[0]; var setStep = stepState[1];
   var mixerState = useState(null); var mixer = mixerState[0]; var setMixer = mixerState[1];
