@@ -143,78 +143,42 @@ function Footer({ navigate }) {
   );
 }
 
-// ── AUDIO ANALYSIS - uses Float32Array for speed, no array.push loops ─────────
-async function measureAudio(file) {
+// ── AUDIO ANALYSIS - slices file BEFORE decoding, never loads full 2hr file ───
+async function decodeSlice(blob) {
   return new Promise(function(resolve, reject) {
     var reader = new FileReader();
-    reader.onerror = function() { reject(new Error("Cannot read file")); };
+    reader.onerror = function() { reject(new Error("Read error")); };
     reader.onload = async function(e) {
       try {
         var AudioCtxClass = window.AudioContext || window.webkitAudioContext;
-        if (!AudioCtxClass) { reject(new Error("AudioContext not supported")); return; }
         var ctx = new AudioCtxClass();
         var buf;
-        try { buf = await ctx.decodeAudioData(e.target.result.slice(0)); }
-        catch(decodeErr) { ctx.close(); reject(new Error("Cannot decode audio. Try MP3 or WAV.")); return; }
+        try { buf = await ctx.decodeAudioData(e.target.result); }
+        catch(de) { ctx.close(); resolve(null); return; }
         ctx.close();
-
         var sr = buf.sampleRate;
         var numCh = buf.numberOfChannels;
-        var totalSamples = buf.getChannelData(0).length;
-        var totalDuration = Math.round(totalSamples / sr);
-
-        // For files over 10 min, analyze 3 slices of up to 3 min each
-        // Use subarray instead of push - 100x faster, no memory blowup
-        var isLongFile = totalDuration > 600;
-        var sliceCount = 1;
-        var L, R;
-
-        if (!isLongFile) {
-          // Short file - use whole thing directly (no copy)
-          L = buf.getChannelData(0);
-          R = numCh > 1 ? buf.getChannelData(1) : buf.getChannelData(0);
-        } else {
-          // Long file - concatenate 3 Float32Array slices efficiently
-          var sliceSec = Math.min(180, Math.floor(totalDuration / 3));
-          var sliceSamp = Math.floor(sliceSec * sr);
-          var midStart = Math.floor(totalSamples / 2) - Math.floor(sliceSamp / 2);
-          var starts = [0, Math.max(0, midStart), Math.max(0, totalSamples - sliceSamp)];
-          sliceCount = 3;
-
-          var rawL = buf.getChannelData(0);
-          var rawR = numCh > 1 ? buf.getChannelData(1) : buf.getChannelData(0);
-          var combined = sliceSamp * 3;
-          var mergedL = new Float32Array(combined);
-          var mergedR = new Float32Array(combined);
-          for (var si = 0; si < 3; si++) {
-            var st = starts[si];
-            var en = Math.min(totalSamples, st + sliceSamp);
-            mergedL.set(rawL.subarray(st, en), si * sliceSamp);
-            mergedR.set(rawR.subarray(st, en), si * sliceSamp);
-          }
-          L = mergedL;
-          R = mergedR;
-        }
-
+        var L = buf.getChannelData(0);
+        var R = numCh > 1 ? buf.getChannelData(1) : buf.getChannelData(0);
         var total = L.length;
-        if (total < sr) { reject(new Error("File too short. Use at least 5 seconds.")); return; }
+        if (total < 100) { resolve(null); return; }
 
-        // Integrated Loudness
+        // Loudness
         var blockLen = Math.floor(sr * 0.4);
         var hop = Math.floor(blockLen * 0.75);
         var loudSum = 0; var loudCount = 0;
         for (var i = 0; i + blockLen <= total; i += hop) {
           var sq = 0;
           for (var j = i; j < i + blockLen; j++) sq += L[j]*L[j] + R[j]*R[j];
-          var rmsVal = Math.sqrt(sq / (blockLen * 2));
-          if (rmsVal > 0.0001) { loudSum += rmsVal * rmsVal; loudCount++; }
+          var rv = Math.sqrt(sq / (blockLen * 2));
+          if (rv > 0.0001) { loudSum += rv * rv; loudCount++; }
         }
         var avgRMS = loudCount > 0 ? Math.sqrt(loudSum / loudCount) : 0.001;
-        var lufs = Math.round(Math.max(-50, Math.min(-3, 20*Math.log10(avgRMS)-0.691)) * 10) / 10;
+        var lufs = Math.round(Math.max(-50, Math.min(-3, 20*Math.log10(avgRMS)-0.691))*10)/10;
 
         // True Peak
         var maxPk = 0;
-        var stride = Math.max(1, Math.floor(total / 200000));
+        var stride = Math.max(1, Math.floor(total / 100000));
         for (var i = 0; i < total; i += stride) {
           var pk = Math.abs(L[i]) > Math.abs(R[i]) ? Math.abs(L[i]) : Math.abs(R[i]);
           if (pk > maxPk) maxPk = pk;
@@ -223,194 +187,133 @@ async function measureAudio(file) {
 
         // Dynamic Range
         var segLen = Math.floor(sr * 1.0);
-        var segMax = -999; var segMin = 999; var segHigh = -999; var segLow = 999;
-        var segCount = 0;
-        var allSegs = [];
+        var segArr = [];
         for (var i = 0; i + segLen <= total; i += segLen) {
           var sq = 0;
           for (var j = i; j < i + segLen; j++) sq += L[j]*L[j];
-          var segRMS = Math.sqrt(sq / segLen);
-          if (segRMS > 0.0001) { allSegs.push(20*Math.log10(segRMS)); segCount++; }
+          var sr2 = Math.sqrt(sq / segLen);
+          if (sr2 > 0.0001) segArr.push(20*Math.log10(sr2));
         }
-        allSegs.sort(function(a, b) { return b - a; });
-        var topN = Math.max(1, Math.floor(allSegs.length * 0.1));
-        var botN = Math.max(0, Math.floor(allSegs.length * 0.9));
-        var topSum = 0; var botSum = 0; var botCount = 0;
-        for (var k = 0; k < topN; k++) topSum += allSegs[k];
-        for (var k = botN; k < allSegs.length; k++) { botSum += allSegs[k]; botCount++; }
-        var topAvg = topSum / topN;
-        var botAvg = botCount > 0 ? botSum / botCount : topAvg - 10;
-        var dynRange = Math.round(Math.max(2, Math.min(40, topAvg - botAvg)) * 10) / 10;
+        segArr.sort(function(a,b){return b-a;});
+        var topN = Math.max(1, Math.floor(segArr.length*0.1));
+        var botStart = Math.max(0, Math.floor(segArr.length*0.9));
+        var tSum = 0; var bSum = 0; var bN = 0;
+        for (var k = 0; k < topN; k++) tSum += segArr[k];
+        for (var k = botStart; k < segArr.length; k++) { bSum += segArr[k]; bN++; }
+        var dynRange = Math.round(Math.max(2, Math.min(40, (tSum/topN) - (bN>0?bSum/bN:(tSum/topN)-10)))*10)/10;
 
         // Stereo Width
-        var sumLR = 0; var sumL2 = 0; var sumR2 = 0;
-        var strd = Math.max(1, Math.floor(total / 60000));
-        for (var i = 0; i < total; i += strd) {
-          sumLR += L[i]*R[i]; sumL2 += L[i]*L[i]; sumR2 += R[i]*R[i];
-        }
-        var corrDenom = Math.sqrt(sumL2 * sumR2);
-        var corr = corrDenom > 0 ? Math.max(-1, Math.min(1, sumLR / corrDenom)) : 1;
-        var stereoWidth = Math.round(Math.max(0, Math.min(1, (1-corr)/2)) * 100);
+        var sLR=0,sL2=0,sR2=0;
+        var st = Math.max(1, Math.floor(total/40000));
+        for (var i = 0; i < total; i += st) { sLR+=L[i]*R[i]; sL2+=L[i]*L[i]; sR2+=R[i]*R[i]; }
+        var cd = Math.sqrt(sL2*sR2);
+        var corr = cd > 0 ? Math.max(-1,Math.min(1,sLR/cd)) : 1;
+        var stereoWidth = Math.round(Math.max(0,Math.min(1,(1-corr)/2))*100);
 
-        // Frequency bands
-        var fMid0 = Math.floor(total * 0.3);
-        var fMid1 = Math.floor(total * 0.7);
-        var getBand = function(loHz, hiHz) {
-          var period = Math.max(2, Math.floor(sr / ((hiHz + loHz) / 2)));
-          var bandSq = 0; var bandN = 0;
-          for (var bi = fMid0; bi + period < fMid1; bi += period) {
-            var bandS = 0;
-            for (var bj = bi; bj < bi + period; bj++) bandS += Math.abs((L[bj]+R[bj])/2);
-            bandSq += (bandS/period)*(bandS/period); bandN++;
+        // Freq bands
+        var m0 = Math.floor(total*0.3); var m1 = Math.floor(total*0.7);
+        var gb = function(lo,hi) {
+          var per = Math.max(2,Math.floor(sr/((hi+lo)/2)));
+          var bq=0,bn=0;
+          for (var bi=m0; bi+per<m1; bi+=per) {
+            var bs=0;
+            for (var bj=bi; bj<bi+per; bj++) bs+=Math.abs((L[bj]+R[bj])/2);
+            bq+=(bs/per)*(bs/per); bn++;
           }
-          return bandN > 0 ? 20*Math.log10(Math.sqrt(bandSq/bandN)+0.000001) : -60;
-        };
-
-        var freq = {
-          sub: getBand(20,80), low: getBand(80,250), lowMid: getBand(250,600),
-          mid: getBand(600,2500), highMid: getBand(2500,7000),
-          high: getBand(7000,14000), air: getBand(14000,20000),
-        };
-
-        var clamp = function(v, mn, mx, def) {
-          return (!isFinite(v) || isNaN(v)) ? def : Math.max(mn, Math.min(mx, v));
+          return bn>0 ? 20*Math.log10(Math.sqrt(bq/bn)+0.000001) : -60;
         };
 
         resolve({
-          lufs: clamp(lufs, -60, 0, -20),
-          peakDb: clamp(peakDb, -60, 0, -6),
-          dynRange: clamp(dynRange, 0, 50, 12),
-          stereoWidth: clamp(stereoWidth, 0, 100, 50),
-          freq: {
-            sub: clamp(freq.sub,-80,0,-40), low: clamp(freq.low,-80,0,-40),
-            lowMid: clamp(freq.lowMid,-80,0,-40), mid: clamp(freq.mid,-80,0,-40),
-            highMid: clamp(freq.highMid,-80,0,-40), high: clamp(freq.high,-80,0,-40),
-            air: clamp(freq.air,-80,0,-40),
-          },
-          duration: clamp(totalDuration, 0, 99999, 0),
-          isLongFile: isLongFile,
-          sliceCount: sliceCount,
-          sampleRate: sr || 44100,
-          channels: numCh || 1,
-          fileSize: Math.round(file.size / 1024),
+          lufs:lufs, peakDb:peakDb, dynRange:dynRange, stereoWidth:stereoWidth,
+          duration: Math.round(total/sr), sampleRate:sr, channels:numCh,
+          freq:{ sub:gb(20,80), low:gb(80,250), lowMid:gb(250,600), mid:gb(600,2500), highMid:gb(2500,7000), high:gb(7000,14000), air:gb(14000,20000) }
         });
-      } catch(analysisErr) { reject(analysisErr); }
+      } catch(err) { resolve(null); }
     };
-    reader.readAsArrayBuffer(file);
+    reader.readAsArrayBuffer(blob);
   });
 }
 
-// ── DIAGNOSIS HELPERS ─────────────────────────────────────────────────────────
-function getLufsDiagnosis(lufs) {
-  if (lufs < -24) return { label:"Very Quiet", color:"#ff5757", advice:"Your mix is significantly too quiet for streaming. This is the most important thing to fix." };
-  if (lufs < -20) return { label:"Too Quiet", color:"#ff5757", advice:"Below streaming target. Viewers will struggle to hear it at normal volume." };
-  if (lufs < -18) return { label:"Slightly Quiet", color:"#ffb347", advice:"A little below target. A small gain increase will bring it to the streaming sweet spot." };
-  if (lufs <= -14) return { label:"Good", color:"#00e5a0", advice:"Your loudness is in the ideal range for streaming platforms." };
-  if (lufs <= -10) return { label:"Slightly Loud", color:"#ffb347", advice:"Slightly above target. Consider pulling back your master level a little." };
-  return { label:"Too Loud", color:"#ff5757", advice:"Your mix is very loud and may be clipping on some platforms." };
-}
-function getDynDiagnosis(dr) {
-  if (dr < 4) return { label:"Over-compressed", color:"#ff5757", advice:"Very little dynamic range. The mix may sound flat. Ease off the compression." };
-  if (dr < 8) return { label:"Slightly Compressed", color:"#ffb347", advice:"A little tight but acceptable for live streaming." };
-  if (dr <= 14) return { label:"Good", color:"#00e5a0", advice:"Dynamic range is ideal for streaming. Natural and controlled." };
-  if (dr <= 20) return { label:"Wide", color:"#ffb347", advice:"Quite dynamic. Add gentle compression on the master bus." };
-  return { label:"Very Wide", color:"#ff5757", advice:"Extremely wide. Quiet parts will be inaudible on stream. Compression needed." };
-}
-function getPeakDiagnosis(peak) {
-  if (peak > 0) return { label:"Clipping!", color:"#ff5757", advice:"Clipping! Causes distortion. Pull master level down immediately." };
-  if (peak > -1) return { label:"Danger Zone", color:"#ff5757", advice:"Dangerously close to clipping. Reduce master level by at least 2 dB." };
-  if (peak > -3) return { label:"A bit hot", color:"#ffb347", advice:"A little high. Pull back 1-2 dB for safer headroom." };
-  if (peak > -6) return { label:"Good", color:"#00e5a0", advice:"Healthy peak level with good headroom." };
-  return { label:"Low", color:"#ffb347", advice:"Peak level is low. You may have room to raise your overall level." };
-}
-function getStereoDiagnosis(sw) {
-  if (sw < 10) return { label:"Nearly Mono", color:"#ffb347", advice:"Very narrow stereo. Try spreading instruments left and right." };
-  if (sw <= 60) return { label:"Good", color:"#00e5a0", advice:"Healthy stereo width. Translates well to speakers and earphones." };
-  if (sw <= 80) return { label:"Wide", color:"#ffb347", advice:"Quite wide. Check mono compatibility on a phone speaker." };
-  return { label:"Very Wide", color:"#ff5757", advice:"Extremely wide. May cause phase issues on mono devices." };
-}
-function getFreqAdvice(freq) {
-  if (!freq) return [{ band:"Frequency Balance", issue:"Unknown", fix:"Could not analyze frequency balance." }];
-  var ref = ((freq.mid || -40) + (freq.highMid || -40)) / 2;
-  var advice = [];
-  if ((freq.sub || -60) > ref + 6) advice.push({ band:"Sub Bass (20-80 Hz)", issue:"Too much", fix:"Cut the sub-bass. Adding boom that wastes headroom on stream." });
-  if ((freq.low || -60) > ref + 5) advice.push({ band:"Low Bass (80-250 Hz)", issue:"Too much", fix:"Cut the low-end. Mix sounds boomy. Apply high-pass filters on channels that do not need bass." });
-  if ((freq.lowMid || -60) > ref + 4) advice.push({ band:"Low Mids (250-600 Hz)", issue:"Muddy", fix:"Cut here. This is the mud zone. Improves clarity and intelligibility significantly." });
-  if ((freq.mid || -60) < ref - 5) advice.push({ band:"Mids (600Hz - 2.5kHz)", issue:"Scooped", fix:"The mids are too low. This is where voices live. Boost here for better intelligibility." });
-  if ((freq.highMid || -60) < ref - 5) advice.push({ band:"Upper Mids (2.5-7kHz)", issue:"Dull", fix:"Boost upper mids to add presence and help vocals cut through on stream." });
-  if ((freq.high || -60) < ref - 8) advice.push({ band:"Highs (7-14kHz)", issue:"Dark", fix:"Mix sounds dark or muffled. A gentle high-shelf boost adds air and clarity." });
-  if ((freq.air || -60) < ref - 12) advice.push({ band:"Air (14-20kHz)", issue:"Missing", fix:"Very little high-frequency air. A gentle shelf above 12kHz adds sparkle and openness." });
-  if (advice.length === 0) advice.push({ band:"Overall Frequency Balance", issue:"Good", fix:"Frequency balance looks reasonable. Focus on the loudness and dynamics recommendations." });
-  return advice;
-}
-function generateRecs(lufs, peak, dynRange, stereoWidth, freq) {
-  var safeL = isFinite(lufs) ? lufs : -20;
-  var safeP = isFinite(peak) ? peak : -6;
-  var safeD = isFinite(dynRange) ? dynRange : 12;
-  var safeS = isFinite(stereoWidth) ? stereoWidth : 50;
-  var safeF = freq || { sub:-40, low:-40, lowMid:-40, mid:-40, highMid:-40, high:-40, air:-40 };
-  var recs = [];
-  if (safeL < -20) recs.push({ priority:"high", title:"Increase Overall Level", detail:"At " + safeL + " LUFS your mix is too quiet for streaming. Target is -16 LUFS. Gradually increase your master output." });
-  else if (safeL < -17) recs.push({ priority:"med", title:"Slightly Raise Your Level", detail:"At " + safeL + " LUFS you are close to target. Add 1-3 dB on your master output." });
-  else recs.push({ priority:"ok", title:"Good Overall Level", detail:"Loudness at " + safeL + " LUFS is within the ideal streaming range. Maintain this." });
-  if (safeP > -1) recs.push({ priority:"high", title:"Fix Clipping Immediately", detail:"Peaking at " + safeP + " dBTP causes distortion. Reduce master level before anything else." });
-  else if (safeP > -3) recs.push({ priority:"med", title:"Reduce Headroom Risk", detail:"Peak at " + safeP + " dBTP is close to distorting. Pull master down by 2 dB." });
-  if (safeD > 16) recs.push({ priority:"high", title:"Add Compression", detail:"Dynamic range of " + safeD + " LU is too wide for streaming. Quiet moments will be inaudible. Add a compressor at 2:1 or 3:1 on your master output." });
-  else if (safeD < 4) recs.push({ priority:"med", title:"Ease Off Compression", detail:"Only " + safeD + " LU of dynamic range. Mix sounds flat. Reduce compression ratio or raise the threshold." });
-  else recs.push({ priority:"ok", title:"Good Dynamic Control", detail:"Dynamic range of " + safeD + " LU is healthy for streaming." });
-  if (safeS < 15) recs.push({ priority:"med", title:"Widen Stereo Image", detail:"Mix is nearly mono at " + safeS + "%. Pan instruments left and right for a wider, more immersive sound." });
-  else if (safeS > 80) recs.push({ priority:"med", title:"Check Mono Compatibility", detail:"Very wide stereo at " + safeS + "%. Test on a phone speaker. If it sounds thin, narrow the stereo width." });
-  var freqAdvice = getFreqAdvice(safeF);
-  for (var fi = 0; fi < freqAdvice.length; fi++) {
-    if (freqAdvice[fi].issue !== "Good") recs.push({ priority:"med", title:freqAdvice[fi].band + " - " + freqAdvice[fi].issue, detail:freqAdvice[fi].fix });
-  }
-  recs.push({ priority:"tip", title:"Dedicated Stream Output", detail:"Always use a dedicated output for your stream, separate from your main house speakers. This lets you control stream level independently." });
-  recs.push({ priority:"tip", title:"High Pass Filter Every Channel", detail:"Apply a high-pass filter on every channel that does not need deep bass. Removes rumble and muddiness." });
-  recs.push({ priority:"tip", title:"Phone Speaker Test", detail:"Check your stream on earbuds or a phone speaker before going live. If it sounds good there, it sounds good for most of your audience." });
-  return recs;
+function average(arr) {
+  if (!arr || arr.length === 0) return 0;
+  var s = 0; for (var i=0; i<arr.length; i++) s+=arr[i]; return s/arr.length;
 }
 
-function generatePDF(results, fileName) {
-  var win = window.open("", "_blank");
-  if (!win) { alert("Please allow popups to download the PDF report."); return; }
-  var now = new Date().toLocaleDateString();
-  var ld = getLufsDiagnosis(results.lufs);
-  var dd = getDynDiagnosis(results.dynRange);
-  var pd = getPeakDiagnosis(results.peakDb);
-  var sd = getStereoDiagnosis(results.stereoWidth);
-  var freqRows = results.freq ? [
-    ["Sub Bass 20-80 Hz", Math.round(results.freq.sub)],
-    ["Low Bass 80-250 Hz", Math.round(results.freq.low)],
-    ["Low Mids 250-600 Hz", Math.round(results.freq.lowMid)],
-    ["Mids 600Hz-2.5kHz", Math.round(results.freq.mid)],
-    ["Upper Mids 2.5-7kHz", Math.round(results.freq.highMid)],
-    ["Highs 7-14kHz", Math.round(results.freq.high)],
-    ["Air 14-20kHz", Math.round(results.freq.air)],
-  ] : [];
-  var recHTML = results.recs.map(function(r) {
-    return '<div class="rec ' + r.priority + '"><div class="rt">' + r.title + '</div><div class="rd">' + r.detail + '</div></div>';
-  }).join("");
-  var freqHTML = freqRows.map(function(row) {
-    return '<div class="fi"><span>' + row[0] + '</span><span>' + row[1] + ' dB rel</span></div>';
-  }).join("");
-  win.document.write('<!DOCTYPE html><html><head><title>MixCheck AI Report</title><style>body{font-family:Arial,sans-serif;max-width:800px;margin:0 auto;padding:40px;color:#111}h1{font-size:28px;margin:0 0 4px}.sub{color:#666;font-size:13px;margin-bottom:32px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:32px}.metric{border:1px solid #e0e0e0;border-radius:10px;padding:16px}.ml{font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#888;margin-bottom:6px}.mv{font-size:26px;font-weight:900;margin-bottom:4px}.ms{font-size:11px;font-weight:700;margin-bottom:6px}.ma{font-size:12px;color:#555;line-height:1.5}.st{font-size:13px;letter-spacing:3px;text-transform:uppercase;color:#00a070;border-bottom:2px solid #00a070;padding-bottom:8px;margin:28px 0 16px}.rec{border-left:3px solid #ccc;padding:10px 14px;margin-bottom:12px;background:#fafafa;border-radius:0 8px 8px 0}.rec.high{border-color:#e33}.rec.med{border-color:#f90}.rec.ok{border-color:#0a0}.rec.tip{border-color:#4a7cff}.rt{font-weight:700;font-size:14px;margin-bottom:4px}.rd{font-size:13px;color:#444;line-height:1.6}.fi{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #eee;font-size:13px}.footer{margin-top:48px;text-align:center;font-size:11px;color:#aaa}</style></head><body>');
-  win.document.write('<h1>MixCheck AI</h1><div class="sub">Audio Analysis Report - ' + now + ' - ' + fileName + '</div>');
-  win.document.write('<div class="grid">');
-  win.document.write('<div class="metric"><div class="ml">Loudness</div><div class="mv">' + results.lufs + ' LUFS</div><div class="ms">Target: -16 LUFS | ' + ld.label + '</div><div class="ma">' + ld.advice + '</div></div>');
-  win.document.write('<div class="metric"><div class="ml">True Peak</div><div class="mv">' + results.peakDb + ' dBTP</div><div class="ms">Target: below -1 dBTP | ' + pd.label + '</div><div class="ma">' + pd.advice + '</div></div>');
-  win.document.write('<div class="metric"><div class="ml">Dynamic Range</div><div class="mv">' + results.dynRange + ' LU</div><div class="ms">Target: 8-14 LU | ' + dd.label + '</div><div class="ma">' + dd.advice + '</div></div>');
-  win.document.write('<div class="metric"><div class="ml">Stereo Width</div><div class="mv">' + results.stereoWidth + '%</div><div class="ms">Target: 20-75% | ' + sd.label + '</div><div class="ma">' + sd.advice + '</div></div>');
-  win.document.write('</div>');
-  win.document.write('<div class="st">Recommendations</div>' + recHTML);
-  if (freqHTML) win.document.write('<div class="st">Frequency Balance</div>' + freqHTML);
-  win.document.write('<div class="st">File Info</div>');
-  win.document.write('<div class="fi"><span>Duration</span><span>' + Math.floor(results.duration/60) + 'm ' + (results.duration%60) + 's</span></div>');
-  win.document.write('<div class="fi"><span>Channels</span><span>' + (results.channels === 1 ? "Mono" : "Stereo") + '</span></div>');
-  win.document.write('<div class="footer">MixCheck AI - mixcheckai.com - ' + now + '</div>');
-  win.document.write('</body></html>');
-  win.document.close();
-  setTimeout(function() { win.print(); }, 500);
+async function measureAudio(file) {
+  var sizeMB = file.size / (1024*1024);
+  var isLarge = sizeMB > 25; // Over 25MB use slice approach
+
+  var sliceResults = [];
+  var sliceCount = 1;
+  var isLongFile = false;
+
+  if (!isLarge) {
+    // Small file - decode whole thing at once
+    var result = await decodeSlice(file);
+    if (!result) throw new Error("Cannot decode audio. Try MP3 or WAV.");
+    sliceResults = [result];
+  } else {
+    // Large file - read 3 byte slices BEFORE decoding
+    // This means we NEVER load more than ~5MB into RAM at once
+    isLongFile = true;
+    sliceCount = 3;
+    var sliceSize = Math.min(5*1024*1024, Math.floor(file.size/5)); // 5MB per slice max
+    var positions = [
+      0,
+      Math.floor(file.size/2 - sliceSize/2),
+      Math.max(0, file.size - sliceSize)
+    ];
+    for (var pi = 0; pi < positions.length; pi++) {
+      var start = Math.max(0, positions[pi]);
+      var end = Math.min(file.size, start + sliceSize);
+      var blob = file.slice(start, end);
+      var res = await decodeSlice(blob);
+      if (res) sliceResults.push(res);
+    }
+    if (sliceResults.length === 0) throw new Error("Cannot decode audio. Try exporting as MP3 or WAV.");
+  }
+
+  // Average all slice measurements
+  var clamp = function(v,mn,mx,def) { return (!isFinite(v)||isNaN(v)) ? def : Math.max(mn,Math.min(mx,v)); };
+
+  var lufsArr = sliceResults.map(function(r){return r.lufs;});
+  var peakArr = sliceResults.map(function(r){return r.peakDb;});
+  var dynArr  = sliceResults.map(function(r){return r.dynRange;});
+  var swArr   = sliceResults.map(function(r){return r.stereoWidth;});
+
+  var totalDur = 0;
+  for (var i=0; i<sliceResults.length; i++) totalDur += sliceResults[i].duration;
+
+  var freq = {
+    sub: average(sliceResults.map(function(r){return r.freq.sub;})),
+    low: average(sliceResults.map(function(r){return r.freq.low;})),
+    lowMid: average(sliceResults.map(function(r){return r.freq.lowMid;})),
+    mid: average(sliceResults.map(function(r){return r.freq.mid;})),
+    highMid: average(sliceResults.map(function(r){return r.freq.highMid;})),
+    high: average(sliceResults.map(function(r){return r.freq.high;})),
+    air: average(sliceResults.map(function(r){return r.freq.air;})),
+  };
+
+  return {
+    lufs: clamp(average(lufsArr),-60,0,-20),
+    peakDb: clamp(Math.max.apply(null,peakArr),-60,0,-6),
+    dynRange: clamp(average(dynArr),0,50,12),
+    stereoWidth: clamp(average(swArr),0,100,50),
+    freq: {
+      sub: clamp(freq.sub,-80,0,-40), low: clamp(freq.low,-80,0,-40),
+      lowMid: clamp(freq.lowMid,-80,0,-40), mid: clamp(freq.mid,-80,0,-40),
+      highMid: clamp(freq.highMid,-80,0,-40), high: clamp(freq.high,-80,0,-40),
+      air: clamp(freq.air,-80,0,-40),
+    },
+    duration: file.size > 25*1024*1024 ? Math.round(file.size / (sizeMB > 100 ? 16000 : 32000)) : totalDur,
+    isLongFile: isLongFile,
+    sliceCount: sliceCount,
+    sampleRate: sliceResults[0] ? sliceResults[0].sampleRate : 44100,
+    channels: sliceResults[0] ? sliceResults[0].channels : 2,
+    fileSize: Math.round(file.size/1024),
+  };
 }
+
 
 const MIXER_GROUPS = [
   { label:"Allen and Heath", mixers:[
