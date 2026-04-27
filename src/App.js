@@ -403,11 +403,264 @@ function generateRecs(lufs, peak, dynRange, stereoWidth, mixer, tips) {
   return recs;
 }
 
+const INSTRUMENTS = [
+  {
+    id:"kick", name:"Kick Drum", icon:"🥁", color:"#ff5757",
+    hpf:"60 Hz", channel:"Ch 1 (Kick)",
+    geq:[
+      { hz:"60",  adj:"+3.0", reason:"Punch and thump" },
+      { hz:"100", adj:"+1.5", reason:"Body and weight" },
+      { hz:"200", adj:"-2.0", reason:"Cut mud" },
+      { hz:"400", adj:"-3.0", reason:"Remove boxy tone" },
+      { hz:"800", adj:"-1.5", reason:"Cut cardboard sound" },
+      { hz:"2k",  adj:"+1.0", reason:"Click and attack" },
+      { hz:"4k",  adj:"+2.0", reason:"Beater click for stream" },
+      { hz:"8k",  adj:"-1.0", reason:"Reduce harshness" },
+    ],
+    compressor:"Ratio 4:1, Threshold -18 dB, Attack 5ms, Release 80ms. Keeps punch while controlling dynamics.",
+    tips:[
+      "Gate the kick channel to eliminate bleed from other drums",
+      "On QU-24: use the Gate on the channel strip, set threshold at -30 dB",
+      "If kick sounds too boomy on stream, cut -3 dB at 80 Hz",
+      "On livestream, kick needs more click (4 kHz) than the room mix",
+    ],
+    proTip:"Record a sample of just the kick alone to test your gate settings before the service starts.",
+  },
+  {
+    id:"snare", name:"Snare Drum", icon:"🪘", color:"#ffb347",
+    hpf:"100 Hz", channel:"Ch 2 (Snare)",
+    geq:[
+      { hz:"100", adj:"-2.0", reason:"Cut low mud" },
+      { hz:"200", adj:"-1.5", reason:"Remove boxy sound" },
+      { hz:"400", adj:"-2.0", reason:"Cut honky mid" },
+      { hz:"1k",  adj:"+1.5", reason:"Body and crack" },
+      { hz:"2k",  adj:"+2.0", reason:"Crack and cut" },
+      { hz:"5k",  adj:"+2.5", reason:"Snap and presence" },
+      { hz:"8k",  adj:"+1.5", reason:"Wire sizzle" },
+      { hz:"12k", adj:"+1.0", reason:"Air and brightness" },
+    ],
+    compressor:"Ratio 3:1, Threshold -20 dB, Attack 10ms, Release 150ms. Fast attack loses the crack - keep it above 8ms.",
+    tips:[
+      "HPF at 100 Hz - snare has no useful info below this",
+      "The crack lives at 2-5 kHz - this is what cuts through on livestream",
+      "If snare sounds ringy, add a notch filter around 400-600 Hz",
+      "Boost 200 Hz slightly if snare sounds too thin",
+    ],
+    proTip:"Tune the snare before the service. A well-tuned snare needs less EQ than a badly tuned one.",
+  },
+  {
+    id:"bass", name:"Bass Guitar", icon:"🎸", color:"#a78bfa",
+    hpf:"40 Hz", channel:"Ch 3 (Bass DI)",
+    geq:[
+      { hz:"40",  adj:"+1.0", reason:"Sub foundation" },
+      { hz:"80",  adj:"+2.5", reason:"Core bass body" },
+      { hz:"160", adj:"+1.5", reason:"Warmth and weight" },
+      { hz:"300", adj:"-2.0", reason:"Cut mud" },
+      { hz:"600", adj:"-1.5", reason:"Reduce boxy tone" },
+      { hz:"1k",  adj:"+1.0", reason:"Note definition" },
+      { hz:"2k",  adj:"+1.5", reason:"Pick attack" },
+      { hz:"4k",  adj:"+1.0", reason:"String clarity" },
+    ],
+    compressor:"Ratio 4:1, Threshold -16 dB, Attack 20ms, Release 200ms. Bass needs slower attack to preserve the pick transient.",
+    tips:[
+      "Always DI the bass directly - never mic a bass cab for livestream",
+      "HPF at 40 Hz removes rumble without killing the bass tone",
+      "On QU-24: use the DI box insert on Ch 3, send post-fader to Mix 7 and 8",
+      "If bass is too boomy on stream, cut -3 dB at 80 Hz and check the kick too",
+      "Bass and kick share the 80-120 Hz range - make space for both",
+    ],
+    proTip:"Ask your bassist to play a consistent note while you EQ. A sustained low E or A note works best.",
+  },
+  {
+    id:"leadVocal", name:"Lead Vocal", icon:"🎤", color:"#00e5a0",
+    hpf:"120 Hz", channel:"Ch 5 (Lead Vocal)",
+    geq:[
+      { hz:"120", adj:"-2.0", reason:"Cut chest rumble" },
+      { hz:"250", adj:"-1.5", reason:"Remove muddiness" },
+      { hz:"500", adj:"-1.0", reason:"Clear the low-mid" },
+      { hz:"1k",  adj:"+0.5", reason:"Warmth (subtle)" },
+      { hz:"2k",  adj:"+1.5", reason:"Clarity and cut" },
+      { hz:"3.5k",adj:"+2.5", reason:"Presence and intelligibility" },
+      { hz:"6k",  adj:"+1.5", reason:"Breath and air" },
+      { hz:"10k", adj:"+1.0", reason:"Sparkle and air" },
+    ],
+    compressor:"Ratio 3:1, Threshold -18 dB, Attack 10ms, Release 100ms, Gain +3 dB. Most important channel to compress for stream.",
+    tips:[
+      "Lead vocal is the most important channel on the livestream mix",
+      "HPF at 120 Hz removes handling noise and low-end rumble",
+      "3.5 kHz is the presence frequency - boosting here helps vocals cut through everything",
+      "De-ess harsh S sounds: add a narrow cut around 7-8 kHz if sibilance is a problem",
+      "On QU-24: use the bus compressor on Mix 7 and 8, not just the channel compressor",
+    ],
+    proTip:"Listen to the vocal on your phone speaker or earbuds. If you can hear the words clearly there, your congregation at home can too.",
+  },
+  {
+    id:"bgVocals", name:"Backing Vocals", icon:"🎙", color:"#4a7cff",
+    hpf:"150 Hz", channel:"Ch 6-8 (BG Vocals)",
+    geq:[
+      { hz:"150", adj:"-3.0", reason:"Hard HPF - clear low end" },
+      { hz:"300", adj:"-2.0", reason:"Remove mud" },
+      { hz:"500", adj:"-1.5", reason:"Thin out low-mid" },
+      { hz:"1k",  adj:"+0.5", reason:"Slight warmth" },
+      { hz:"2k",  adj:"+1.0", reason:"Presence boost" },
+      { hz:"4k",  adj:"+1.5", reason:"Clarity" },
+      { hz:"8k",  adj:"+1.0", reason:"Air" },
+      { hz:"12k", adj:"+0.5", reason:"Sparkle" },
+    ],
+    compressor:"Ratio 4:1, Threshold -20 dB, Attack 8ms, Release 80ms. Backing vocals need tighter compression than lead.",
+    tips:[
+      "BG vocals should sit under the lead - never compete with it",
+      "Cut more low end than lead vocal - HPF at 150 Hz minimum",
+      "Pan backing vocals: L and R channels slightly left and right of center",
+      "Reduce BG vocal send to Mix 7 and 8 by -3 to -6 dB compared to lead vocal",
+      "If BGs are washing out the mix, try a high-pass at 200 Hz",
+    ],
+    proTip:"Solo the BG vocals in your headphones and make sure they sound clear but thin. They should support, not overpower.",
+  },
+  {
+    id:"electricGuitar", name:"Electric Guitar", icon:"🎸", color:"#ff7eb3",
+    hpf:"100 Hz", channel:"Ch 9 (Elec Guitar)",
+    geq:[
+      { hz:"100", adj:"-2.0", reason:"Cut low mud" },
+      { hz:"200", adj:"-2.5", reason:"Remove boxy sound" },
+      { hz:"400", adj:"-1.5", reason:"Cut honky mid" },
+      { hz:"800", adj:"+0.5", reason:"Slight body" },
+      { hz:"1.5k",adj:"+1.5", reason:"Presence and cut" },
+      { hz:"3k",  adj:"+2.0", reason:"Guitar bite" },
+      { hz:"6k",  adj:"+1.0", reason:"String attack" },
+      { hz:"10k", adj:"-1.0", reason:"Reduce harshness" },
+    ],
+    compressor:"Ratio 3:1, Threshold -22 dB, Attack 15ms, Release 200ms. Light compression keeps the pick dynamics alive.",
+    tips:[
+      "HPF at 100 Hz - guitar has very little useful content below this",
+      "The bite and cut of electric guitar lives at 2-4 kHz",
+      "If guitarist uses a lot of gain, cut more around 200-400 Hz to reduce mud",
+      "On livestream, electric guitar should sit behind vocals - reduce send to stream by -2 dB",
+      "If guitar is too harsh on stream, try a cut at 3-4 kHz",
+    ],
+    proTip:"Ask the guitarist to play at service volume during soundcheck - many guitarists turn up during the service.",
+  },
+  {
+    id:"acousticGuitar", name:"Acoustic Guitar", icon:"🪕", color:"#34d399",
+    hpf:"80 Hz", channel:"Ch 10 (Acoustic DI)",
+    geq:[
+      { hz:"80",  adj:"-1.5", reason:"Cut low rumble" },
+      { hz:"120", adj:"+1.0", reason:"Warmth and body" },
+      { hz:"200", adj:"-2.0", reason:"Remove boxy mud" },
+      { hz:"400", adj:"-1.5", reason:"Cut honky tone" },
+      { hz:"800", adj:"+0.5", reason:"Body presence" },
+      { hz:"2k",  adj:"+1.5", reason:"Pick attack" },
+      { hz:"6k",  adj:"+2.0", reason:"String brightness" },
+      { hz:"12k", adj:"+1.5", reason:"Air and shimmer" },
+    ],
+    compressor:"Ratio 3:1, Threshold -20 dB, Attack 20ms, Release 150ms. Slower attack preserves the pick transient - critical for acoustic.",
+    tips:[
+      "Always DI acoustic guitar - never mic an acoustic for livestream",
+      "The body resonance around 200 Hz can get muddy - cut gently",
+      "Boost 6-12 kHz for string brightness and shimmer",
+      "If acoustic sounds too thin, boost 120 Hz slightly",
+      "Pan acoustic guitar slightly off-center if you have electric guitar too",
+    ],
+    proTip:"Check if the guitarist is using a piezo pickup or a clip-on mic pickup. Piezo sounds thinner and may need more 200 Hz boost.",
+  },
+  {
+    id:"keys", name:"Keys / Piano", icon:"🎹", color:"#fbbf24",
+    hpf:"80 Hz", channel:"Ch 11-12 (Keys L/R)",
+    geq:[
+      { hz:"80",  adj:"-1.5", reason:"Cut low rumble" },
+      { hz:"150", adj:"+0.5", reason:"Slight warmth" },
+      { hz:"250", adj:"-2.5", reason:"Remove mud - keys biggest problem" },
+      { hz:"500", adj:"-1.5", reason:"Clear mid buildup" },
+      { hz:"1k",  adj:"+0.5", reason:"Body" },
+      { hz:"2k",  adj:"+1.0", reason:"Note clarity" },
+      { hz:"5k",  adj:"+1.5", reason:"Brightness and cut" },
+      { hz:"10k", adj:"+1.0", reason:"Air" },
+    ],
+    compressor:"Ratio 3:1, Threshold -20 dB, Attack 15ms, Release 150ms. Keys compress well - helps them sit in the mix.",
+    tips:[
+      "250 Hz is the mud zone for keys - cut this before anything else",
+      "Keys are often too loud on the livestream mix - reduce send by -2 to -4 dB",
+      "If keys player uses pad sounds, HPF at 200 Hz to keep them from clogging the low-mid",
+      "Piano needs more low end (80-200 Hz) than synth pads",
+      "Pan keys slightly left or right if it helps create space for vocals",
+    ],
+    proTip:"Have the keys player play only pads during the first song, then add more as the mix develops. Pads can fill the whole spectrum and muddy the stream.",
+  },
+  {
+    id:"overhead", name:"Overhead / Cymbals", icon:"🪗", color:"#67e8f9",
+    hpf:"200 Hz", channel:"Ch 7-8 (Overheads)",
+    geq:[
+      { hz:"200", adj:"-3.0", reason:"Hard HPF - cut all lows" },
+      { hz:"400", adj:"-2.0", reason:"Remove body buildup" },
+      { hz:"800", adj:"-1.5", reason:"Clear mid wash" },
+      { hz:"2k",  adj:"-1.0", reason:"Reduce harshness" },
+      { hz:"4k",  adj:"+0.5", reason:"Slight definition" },
+      { hz:"8k",  adj:"+1.5", reason:"Cymbal shimmer" },
+      { hz:"12k", adj:"+2.0", reason:"Air and brilliance" },
+      { hz:"16k", adj:"+1.0", reason:"Top-end sheen" },
+    ],
+    compressor:"Ratio 2:1, Threshold -24 dB, Attack 30ms, Release 300ms. Very light compression - overheads need to breathe.",
+    tips:[
+      "Overheads on livestream should be lower than in the room mix",
+      "HPF at 200 Hz is essential - low-end bleed from overheads muddies the whole stream",
+      "If cymbals are harsh on stream, cut -2 dB at 2-3 kHz",
+      "Reduce overhead send to Mix 7 and 8 by -4 to -6 dB",
+      "If you only have one overhead mic, pan it center",
+    ],
+    proTip:"Cymbals are the number one cause of a harsh-sounding livestream. When in doubt, pull the overhead fader down 2-3 dB on your stream send.",
+  },
+  {
+    id:"roomMic", name:"Room Mic", icon:"🏛", color:"#94a3b8",
+    hpf:"250 Hz", channel:"Ch 15-16 (Room)",
+    geq:[
+      { hz:"250", adj:"-3.0", reason:"Cut all lows - room captures everything" },
+      { hz:"500", adj:"-2.0", reason:"Remove low-mid buildup" },
+      { hz:"1k",  adj:"-1.0", reason:"Reduce room tone" },
+      { hz:"2k",  adj:"-1.5", reason:"Control harshness" },
+      { hz:"4k",  adj:"+0.5", reason:"Slight presence" },
+      { hz:"8k",  adj:"+1.0", reason:"Air and space" },
+      { hz:"12k", adj:"+0.5", reason:"Top-end detail" },
+      { hz:"16k", adj:"+0.5", reason:"Sheen" },
+    ],
+    compressor:"Ratio 6:1, Threshold -28 dB, Attack 50ms, Release 500ms. Heavy compression keeps room mic from jumping around.",
+    tips:[
+      "Room mic adds ambience and congregation sound - use sparingly on livestream",
+      "Keep room mic very low on stream send - just a hint of room is enough",
+      "HPF at 250 Hz - room mics capture way too much low end",
+      "If you have crowd cheering, the room mic brings energy to the livestream",
+      "Many churches skip the room mic on stream entirely - that is fine",
+    ],
+    proTip:"The room mic should be barely audible on its own but noticeable when you mute it. That is the right level.",
+  },
+];
+
+function getInstrumentRecs(instrument, lufs, peak, dynRange, freq) {
+  const recs = [];
+  if (lufs < -22) {
+    recs.push({ channel:"Channel Level", action:"This recording is very quiet at " + lufs + " LUFS. Gain up the channel fader by 4-6 dB before applying EQ.", priority:"high" });
+  } else if (lufs < -18) {
+    recs.push({ channel:"Channel Level", action:"Level at " + lufs + " LUFS. Slightly quiet. Add 2 dB of channel gain.", priority:"med" });
+  } else {
+    recs.push({ channel:"Channel Level", action:"Level at " + lufs + " LUFS. Good starting point.", priority:"ok" });
+  }
+  if (peak > -1) {
+    recs.push({ channel:"Peak Warning", action:"Peak at " + peak + " dBTP is clipping! Reduce channel gain immediately.", priority:"high" });
+  }
+  recs.push({ channel:"HPF Setting", action:"Set High Pass Filter (HPF) to " + instrument.hpf + " on " + instrument.channel + ". This removes low-end rumble and mud that hurts your stream.", priority:"high" });
+  recs.push({ channel:"Compressor", action: instrument.compressor, priority:"high" });
+  instrument.tips.forEach((tip, i) => {
+    recs.push({ channel:"Tip " + (i+1), action: tip, priority:"med" });
+  });
+  return recs;
+}
+
 function AnalyzePage({ navigate }) {
   const [step, setStep] = useState(1);
   const [mixer, setMixer] = useState(null);
   const [customMixer, setCustomMixer] = useState("");
   const [showCustom, setShowCustom] = useState(false);
+  const [analysisMode, setAnalysisMode] = useState(null); // "full" or "instrument"
+  const [selectedInstrument, setSelectedInstrument] = useState(null);
   const [file, setFile] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzeStatus, setAnalyzeStatus] = useState("");
@@ -431,25 +684,42 @@ function AnalyzePage({ navigate }) {
       const measured = await measureAudio(f);
       setAnalyzeStatus("Analyzing frequency balance...");
       await new Promise(r => setTimeout(r, 100));
-      setAnalyzeStatus("Generating mixer recommendations...");
+      setAnalyzeStatus("Generating recommendations...");
       const tips = getMixerTips(selectedMixer);
-      const geq = generateGEQ(measured.freq);
-      const recs = generateRecs(measured.lufs, measured.peakDb, measured.dynRange, measured.stereoWidth, selectedMixer, tips);
-      setResults({
-        loudness: { lufs: measured.lufs, status: measured.lufs >= -18 ? "ok" : "low" },
-        peak: { db: measured.peakDb, status: measured.peakDb <= -1 ? "ok" : "high" },
-        dynamic: { range: measured.dynRange, status: measured.dynRange <= 14 ? "ok" : "high" },
-        stereo: { width: measured.stereoWidth, status: measured.stereoWidth >= 20 && measured.stereoWidth <= 75 ? "ok" : "low" },
-        freq: measured.freq, tips, recs, geq,
-      });
-      setStep(3);
+
+      if (analysisMode === "instrument" && selectedInstrument) {
+        const recs = getInstrumentRecs(selectedInstrument, measured.lufs, measured.peakDb, measured.dynRange, measured.freq);
+        setResults({
+          mode: "instrument",
+          instrument: selectedInstrument,
+          loudness: { lufs: measured.lufs, status: measured.lufs >= -18 ? "ok" : "low" },
+          peak: { db: measured.peakDb, status: measured.peakDb <= -1 ? "ok" : "high" },
+          dynamic: { range: measured.dynRange, status: measured.dynRange <= 14 ? "ok" : "high" },
+          stereo: { width: measured.stereoWidth, status: measured.stereoWidth >= 20 ? "ok" : "low" },
+          recs,
+          geq: selectedInstrument.geq,
+          proTip: selectedInstrument.proTip,
+        });
+      } else {
+        const geq = generateGEQ(measured.freq);
+        const recs = generateRecs(measured.lufs, measured.peakDb, measured.dynRange, measured.stereoWidth, selectedMixer, tips);
+        setResults({
+          mode: "full",
+          loudness: { lufs: measured.lufs, status: measured.lufs >= -18 ? "ok" : "low" },
+          peak: { db: measured.peakDb, status: measured.peakDb <= -1 ? "ok" : "high" },
+          dynamic: { range: measured.dynRange, status: measured.dynRange <= 14 ? "ok" : "high" },
+          stereo: { width: measured.stereoWidth, status: measured.stereoWidth >= 20 && measured.stereoWidth <= 75 ? "ok" : "low" },
+          freq: measured.freq, tips, recs, geq,
+        });
+      }
+      setStep(4);
     } catch(err) {
-      setResults({ error: err.message || "Could not analyze this file. Please try an MP3 or WAV recording." });
-      setStep(3);
+      setResults({ error: err.message || "Could not analyze this file. Try an MP3 or WAV." });
+      setStep(4);
     }
     setAnalyzing(false);
     setAnalyzeStatus("");
-  }, [selectedMixer]);
+  }, [selectedMixer, analysisMode, selectedInstrument]);
 
   const onDrop = useCallback((e) => {
     e.preventDefault();
@@ -461,7 +731,424 @@ function AnalyzePage({ navigate }) {
   const onPick = (e) => { if (e.target.files[0]) analyze(e.target.files[0]); };
   const statusColor = (s) => s === "high" ? "#ff5757" : s === "low" ? "#ffb347" : "#00e5a0";
   const prioColor = (p) => p === "high" ? "#ff5757" : p === "med" ? "#ffb347" : p === "ok" ? "#00e5a0" : "#4a5568";
-  const reset = () => { setStep(1); setMixer(null); setFile(null); setResults(null); setShowCustom(false); setCustomMixer(""); };
+  const reset = () => {
+    setStep(1); setMixer(null); setFile(null); setResults(null);
+    setShowCustom(false); setCustomMixer("");
+    setAnalysisMode(null); setSelectedInstrument(null);
+  };
+
+  const stepLabels = analysisMode === "instrument"
+    ? [["1","Mixer"],["2","Mode"],["3","Instrument"],["4","Upload"],["5","Results"]]
+    : [["1","Mixer"],["2","Mode"],["3","Upload"],["4","Results"]];
+
+  const totalSteps = analysisMode === "instrument" ? 5 : 4;
+
+  return (
+    <div style={{ background:"#07090f", minHeight:"100vh", paddingTop:80, fontFamily:"Georgia,serif", color:"#e8eaf0" }}>
+      <div style={{ maxWidth:820, margin:"0 auto", padding:"40px 20px" }}>
+        <div style={{ marginBottom:28 }}>
+          <div style={{ fontSize:10, letterSpacing:4, color:"#00e5a0", fontFamily:"monospace", fontWeight:700, marginBottom:10 }}>AUDIO ANALYZER</div>
+          <h1 style={{ fontSize:"clamp(22px,4vw,36px)", fontWeight:900, margin:"0 0 8px", letterSpacing:-1.5, color:"#fff" }}>Analyze your mix.</h1>
+          <p style={{ fontSize:13, color:"#6b7280", fontFamily:"sans-serif", margin:0 }}>Full mix or per-instrument analysis. Works with any mixer.</p>
+        </div>
+
+        {/* Progress Steps */}
+        <div style={{ display:"flex", gap:6, marginBottom:28, alignItems:"center", overflowX:"auto", paddingBottom:4 }}>
+          {[["1","Mixer"],["2","Mode"],["3", analysisMode==="instrument" ? "Instrument" : "Upload"],["4", analysisMode==="instrument" ? "Upload" : "Results"],
+            ...(analysisMode==="instrument" ? [["5","Results"]] : [])
+          ].map(([n,label],i) => (
+            <React.Fragment key={n}>
+              <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4, flexShrink:0 }}>
+                <div style={{
+                  width:26, height:26, borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center",
+                  fontSize:11, fontWeight:700, fontFamily:"monospace",
+                  background: step > i+1 ? "#00e5a0" : step === i+1 ? "rgba(0,229,160,0.15)" : "#0d1017",
+                  border: step >= i+1 ? "1.5px solid #00e5a0" : "1.5px solid #1a1f2e",
+                  color: step > i+1 ? "#07090f" : step === i+1 ? "#00e5a0" : "#2a3040",
+                }}>{step > i+1 ? "v" : n}</div>
+                <span style={{ fontSize:9, color: step===i+1 ? "#e8eaf0" : "#2a3040", fontFamily:"sans-serif" }}>{label}</span>
+              </div>
+              {i < (analysisMode==="instrument" ? 4 : 3) && <div style={{ flex:1, height:1, background: step > i+1 ? "#00e5a044" : "#1a1f2e", minWidth:12 }} />}
+            </React.Fragment>
+          ))}
+        </div>
+
+        {/* STEP 1 - MIXER */}
+        {step === 1 && (
+          <div style={{ animation:"fadein 0.3s ease" }}>
+            <div style={{ fontSize:13, color:"#6b7280", fontFamily:"sans-serif", marginBottom:20 }}>Choose your mixer for tailored recommendations.</div>
+            {MIXER_GROUPS.map((group, gi) => (
+              <div key={gi} style={{ marginBottom:20 }}>
+                <div style={{ fontSize:10, letterSpacing:3, color:"#4a5568", fontFamily:"monospace", fontWeight:700, marginBottom:10 }}>{group.label.toUpperCase()}</div>
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))", gap:8 }}>
+                  {group.mixers.map((m) => (
+                    <button key={m.id} onClick={() => { setMixer(m); setShowCustom(false); setStep(2); }} style={{
+                      background: mixer && mixer.id === m.id ? "rgba(0,229,160,0.1)" : "#0d1017",
+                      border: mixer && mixer.id === m.id ? "1.5px solid #00e5a0" : "1px solid #1a1f2e",
+                      borderRadius:10, padding:"12px 10px", cursor:"pointer", textAlign:"left",
+                    }}>
+                      <div style={{ fontSize:13, fontWeight:700, color:"#e8eaf0", fontFamily:"sans-serif", marginBottom:4 }}>{m.name}</div>
+                      <div style={{ fontSize:9, color: m.type==="digital" ? "#4a7cff" : "#ffb347", background: m.type==="digital" ? "rgba(74,124,255,0.1)" : "rgba(255,179,71,0.1)", padding:"2px 6px", borderRadius:4, fontFamily:"monospace", fontWeight:700, display:"inline-block" }}>{m.type.toUpperCase()}</div>
+                      <div style={{ fontSize:9, color:"#2a3040", fontFamily:"sans-serif", marginTop:4 }}>{m.streams}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+            <div style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:12, padding:"16px" }}>
+              <div style={{ fontSize:11, color:"#ffb347", fontFamily:"monospace", fontWeight:700, letterSpacing:2, marginBottom:12 }}>MY MIXER IS NOT LISTED</div>
+              <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+                <input placeholder="Type your mixer name e.g. Mackie 1642" value={customMixer}
+                  onChange={e => { setCustomMixer(e.target.value); setShowCustom(true); setMixer(null); }}
+                  style={{ flex:1, minWidth:200, background:"#060810", border:"1px solid #1a1f2e", borderRadius:8, padding:"10px 14px", color:"#e8eaf0", fontSize:13, fontFamily:"sans-serif", outline:"none" }} />
+                <button onClick={() => { if(customMixer.trim()) { setShowCustom(true); setStep(2); } }} disabled={!customMixer.trim()}
+                  style={{ background: customMixer.trim() ? "#ffb347" : "#1a1f2e", color: customMixer.trim() ? "#07090f" : "#2a3040", border:"none", borderRadius:8, padding:"10px 20px", fontSize:13, fontFamily:"sans-serif", fontWeight:700, cursor: customMixer.trim() ? "pointer" : "not-allowed" }}>
+                  Use This Mixer
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* STEP 2 - MODE SELECT */}
+        {step === 2 && (
+          <div style={{ animation:"fadein 0.3s ease" }}>
+            <div style={{ fontSize:13, color:"#6b7280", fontFamily:"sans-serif", marginBottom:24 }}>
+              What do you want to analyze?
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginBottom:20 }}>
+              {/* Full Mix */}
+              <button onClick={() => { setAnalysisMode("full"); setSelectedInstrument(null); setStep(3); }} style={{
+                background: analysisMode==="full" ? "rgba(0,229,160,0.08)" : "#0d1017",
+                border: analysisMode==="full" ? "1.5px solid #00e5a0" : "1px solid #1a1f2e",
+                borderRadius:16, padding:"28px 20px", cursor:"pointer", textAlign:"left",
+                transition:"all 0.2s",
+              }}>
+                <div style={{ fontSize:36, marginBottom:16 }}>🎛</div>
+                <div style={{ fontSize:16, fontWeight:800, color:"#fff", fontFamily:"sans-serif", marginBottom:8 }}>Full Mix</div>
+                <div style={{ fontSize:12, color:"#6b7280", fontFamily:"sans-serif", lineHeight:1.6 }}>
+                  Analyze your entire mix recording. Get overall loudness, frequency balance, and general channel recommendations.
+                </div>
+                <div style={{ marginTop:14, display:"inline-block", background:"rgba(0,229,160,0.1)", border:"1px solid rgba(0,229,160,0.2)", borderRadius:6, padding:"4px 10px", fontSize:10, color:"#00e5a0", fontFamily:"monospace", fontWeight:700 }}>FREE</div>
+              </button>
+
+              {/* Per Instrument */}
+              <button onClick={() => { setAnalysisMode("instrument"); setStep(3); }} style={{
+                background: analysisMode==="instrument" ? "rgba(74,124,255,0.08)" : "#0d1017",
+                border: analysisMode==="instrument" ? "1.5px solid #4a7cff" : "1px solid #1a1f2e",
+                borderRadius:16, padding:"28px 20px", cursor:"pointer", textAlign:"left",
+                transition:"all 0.2s", position:"relative", overflow:"hidden",
+              }}>
+                <div style={{ position:"absolute", top:-1, right:16, background:"linear-gradient(90deg,#4a7cff,#7c3aed)", color:"#fff", fontSize:9, fontWeight:800, fontFamily:"monospace", letterSpacing:2, padding:"4px 10px", borderRadius:"0 0 8px 8px" }}>PRO</div>
+                <div style={{ fontSize:36, marginBottom:16 }}>🎚</div>
+                <div style={{ fontSize:16, fontWeight:800, color:"#fff", fontFamily:"sans-serif", marginBottom:8 }}>Per Instrument</div>
+                <div style={{ fontSize:12, color:"#6b7280", fontFamily:"sans-serif", lineHeight:1.6 }}>
+                  Analyze a single instrument recording. Get exact EQ curves, HPF settings, and compressor values for that specific instrument.
+                </div>
+                <div style={{ marginTop:14, display:"flex", flexWrap:"wrap", gap:4 }}>
+                  {["Kick","Vocal","Bass","Guitar","Keys","Snare"].map(i => (
+                    <span key={i} style={{ background:"rgba(74,124,255,0.1)", border:"1px solid rgba(74,124,255,0.2)", borderRadius:4, padding:"2px 8px", fontSize:9, color:"#4a7cff", fontFamily:"monospace" }}>{i}</span>
+                  ))}
+                  <span style={{ fontSize:9, color:"#4a5568", fontFamily:"monospace", padding:"2px 0" }}>+more</span>
+                </div>
+              </button>
+            </div>
+            <button onClick={() => setStep(1)} style={{ background:"none", border:"none", color:"#4a5568", fontSize:12, fontFamily:"sans-serif", cursor:"pointer" }}>
+              Back to mixer select
+            </button>
+          </div>
+        )}
+
+        {/* STEP 3 - INSTRUMENT SELECT (only if instrument mode) */}
+        {step === 3 && analysisMode === "instrument" && (
+          <div style={{ animation:"fadein 0.3s ease" }}>
+            <div style={{ fontSize:13, color:"#6b7280", fontFamily:"sans-serif", marginBottom:20 }}>
+              Which instrument do you want to analyze? Upload an isolated recording or a mix where that instrument is dominant.
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))", gap:10, marginBottom:20 }}>
+              {INSTRUMENTS.map((inst) => (
+                <button key={inst.id} onClick={() => { setSelectedInstrument(inst); setStep(4); }} style={{
+                  background: selectedInstrument?.id === inst.id ? inst.color + "18" : "#0d1017",
+                  border: selectedInstrument?.id === inst.id ? "1.5px solid " + inst.color : "1px solid #1a1f2e",
+                  borderRadius:12, padding:"16px 14px", cursor:"pointer", textAlign:"left",
+                  transition:"all 0.15s",
+                }}>
+                  <div style={{ fontSize:28, marginBottom:10 }}>{inst.icon}</div>
+                  <div style={{ fontSize:13, fontWeight:700, color:"#e8eaf0", fontFamily:"sans-serif", marginBottom:4 }}>{inst.name}</div>
+                  <div style={{ fontSize:10, color:"#4a5568", fontFamily:"sans-serif" }}>HPF: {inst.hpf}</div>
+                  <div style={{ fontSize:9, color: inst.color, fontFamily:"monospace", marginTop:6, fontWeight:700 }}>{inst.channel}</div>
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setStep(2)} style={{ background:"none", border:"none", color:"#4a5568", fontSize:12, fontFamily:"sans-serif", cursor:"pointer" }}>
+              Back to mode select
+            </button>
+          </div>
+        )}
+
+        {/* STEP 3 (full mode) or STEP 4 (instrument mode) - FILE UPLOAD */}
+        {((step === 3 && analysisMode === "full") || (step === 4 && analysisMode === "instrument")) && !analyzing && (
+          <div style={{ animation:"fadein 0.3s ease" }}>
+            {/* Badges */}
+            <div style={{ display:"flex", gap:10, flexWrap:"wrap", marginBottom:20 }}>
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", background:"rgba(0,229,160,0.06)", border:"1px solid rgba(0,229,160,0.2)", borderRadius:10, padding:"8px 14px", flex:1 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                  <span style={{ fontSize:16 }}>🎛</span>
+                  <div>
+                    <div style={{ fontSize:12, fontWeight:700, color:"#00e5a0", fontFamily:"sans-serif" }}>{selectedMixer ? selectedMixer.name : "Custom"}</div>
+                    <div style={{ fontSize:10, color:"#4a5568", fontFamily:"sans-serif" }}>{selectedMixer ? selectedMixer.streams : "Aux Out"}</div>
+                  </div>
+                </div>
+                <button onClick={() => setStep(1)} style={{ background:"none", border:"none", color:"#4a5568", fontSize:11, fontFamily:"sans-serif", cursor:"pointer" }}>Change</button>
+              </div>
+              {analysisMode === "instrument" && selectedInstrument && (
+                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", background: selectedInstrument.color + "10", border:"1px solid " + selectedInstrument.color + "40", borderRadius:10, padding:"8px 14px", flex:1 }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                    <span style={{ fontSize:16 }}>{selectedInstrument.icon}</span>
+                    <div>
+                      <div style={{ fontSize:12, fontWeight:700, color: selectedInstrument.color, fontFamily:"sans-serif" }}>{selectedInstrument.name}</div>
+                      <div style={{ fontSize:10, color:"#4a5568", fontFamily:"sans-serif" }}>Per-instrument analysis</div>
+                    </div>
+                  </div>
+                  <button onClick={() => setStep(3)} style={{ background:"none", border:"none", color:"#4a5568", fontSize:11, fontFamily:"sans-serif", cursor:"pointer" }}>Change</button>
+                </div>
+              )}
+            </div>
+
+            {analysisMode === "instrument" && (
+              <div style={{ background:"rgba(74,124,255,0.06)", border:"1px solid rgba(74,124,255,0.2)", borderRadius:10, padding:"12px 16px", marginBottom:20, fontSize:12, color:"#8892a4", fontFamily:"sans-serif", lineHeight:1.6 }}>
+                <span style={{ color:"#4a7cff", fontWeight:700 }}>Tip: </span>
+                Upload a recording where {selectedInstrument?.name} is clearly audible. An isolated track works best, but a live mix is fine too.
+              </div>
+            )}
+
+            <div
+              onClick={() => fileRef.current.click()}
+              onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files[0]; if(f) analyze(f); }}
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              style={{ border:"2px dashed " + (dragOver ? "#00e5a0" : "#1a1f2e"), borderRadius:20, padding:"56px 32px", textAlign:"center", cursor:"pointer", background: dragOver ? "rgba(0,229,160,0.04)" : "#0d1017" }}
+            >
+              <div style={{ fontSize:44, marginBottom:14 }}>🎵</div>
+              <div style={{ fontSize:16, fontWeight:700, color:"#e8eaf0", fontFamily:"sans-serif", marginBottom:8 }}>Drop your audio file here</div>
+              <div style={{ fontSize:13, color:"#4a5568", fontFamily:"sans-serif", marginBottom:20 }}>MP3, WAV, AAC, M4A, FLAC</div>
+              <div style={{ display:"inline-flex", alignItems:"center", gap:8, background:"#00e5a0", color:"#07090f", borderRadius:8, padding:"10px 22px", fontSize:13, fontWeight:700, fontFamily:"sans-serif" }}>
+                Choose File
+              </div>
+              <input ref={fileRef} type="file" accept="audio/*,.mp3,.wav,.aac,.m4a,.flac,.ogg" onChange={onPick} style={{ display:"none" }} />
+            </div>
+            <div style={{ textAlign:"center", marginTop:12 }}>
+              <span style={{ fontSize:12, color:"#2a3040", fontFamily:"sans-serif" }}>Cannot see your file? </span>
+              <label style={{ fontSize:12, color:"#4a7cff", fontFamily:"sans-serif", cursor:"pointer", fontWeight:700 }}>
+                Browse all files
+                <input ref={fileRef2} type="file" onChange={onPick} style={{ display:"none" }} />
+              </label>
+            </div>
+          </div>
+        )}
+
+        {/* ANALYZING */}
+        {analyzing && (
+          <div style={{ textAlign:"center", padding:"80px 32px", background:"#0d1017", borderRadius:20, border:"1px solid #1a1f2e" }}>
+            <div style={{ width:40, height:40, border:"3px solid #1a1f2e", borderTop:"3px solid #00e5a0", borderRadius:"50%", margin:"0 auto 24px", animation:"spin 0.8s linear infinite" }} />
+            <div style={{ fontSize:15, fontWeight:700, color:"#e8eaf0", fontFamily:"sans-serif", marginBottom:6 }}>{analyzeStatus}</div>
+            <div style={{ fontSize:12, color:"#2a3040", fontFamily:"sans-serif" }}>{file ? file.name : ""}</div>
+          </div>
+        )}
+
+        {/* STEP 4 (full) or STEP 5 (instrument) - RESULTS */}
+        {step === 4 && results && analysisMode === "full" && (
+          <FullMixResults results={results} file={file} selectedMixer={selectedMixer} navigate={navigate} reset={reset} statusColor={statusColor} prioColor={prioColor} />
+        )}
+        {step === 4 && results && analysisMode === "instrument" && !results.error && (
+          <InstrumentResults results={results} file={file} selectedMixer={selectedMixer} navigate={navigate} reset={reset} statusColor={statusColor} prioColor={prioColor} />
+        )}
+        {results && results.error && (
+          <div style={{ background:"rgba(255,87,87,0.08)", border:"1px solid rgba(255,87,87,0.3)", borderRadius:16, padding:"28px", textAlign:"center" }}>
+            <div style={{ fontSize:32, marginBottom:16 }}>warning</div>
+            <div style={{ fontSize:15, fontWeight:700, color:"#ff5757", fontFamily:"sans-serif", marginBottom:8 }}>Could not analyze this file</div>
+            <div style={{ fontSize:13, color:"#6b7280", fontFamily:"sans-serif", marginBottom:20 }}>{results.error}</div>
+            <button onClick={reset} style={{ background:"#ff5757", color:"#fff", border:"none", borderRadius:8, padding:"10px 24px", fontSize:13, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer" }}>Try Another File</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function FullMixResults({ results, file, selectedMixer, navigate, reset, statusColor, prioColor }) {
+  return (
+    <div style={{ animation:"fadein 0.4s ease" }}>
+      <div style={{ display:"flex", gap:10, flexWrap:"wrap", marginBottom:20 }}>
+        <div style={{ background:"rgba(0,229,160,0.08)", border:"1px solid rgba(0,229,160,0.2)", borderRadius:8, padding:"6px 14px", fontSize:12, color:"#00e5a0", fontFamily:"sans-serif", fontWeight:600 }}>
+          Full Mix - {selectedMixer ? selectedMixer.name : "Custom"}
+        </div>
+        <div style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:8, padding:"6px 14px", fontSize:12, color:"#6b7280", fontFamily:"sans-serif" }}>
+          {file ? file.name : ""}
+        </div>
+      </div>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:10, marginBottom:20 }}>
+        {[
+          { label:"LOUDNESS", val: results.loudness.lufs + " LUFS", target:"Target: -16 LUFS", status: results.loudness.status },
+          { label:"TRUE PEAK", val: results.peak.db + " dBTP", target:"Target: below -1 dBTP", status: results.peak.status },
+          { label:"DYNAMIC RANGE", val: results.dynamic.range + " LU", target:"Target: 8-12 LU", status: results.dynamic.status },
+          { label:"STEREO WIDTH", val: results.stereo.width + "%", target:"Target: 50-80%", status: results.stereo.status },
+        ].map((m,i) => (
+          <div key={i} style={{ background:"#0d1017", border:"1px solid " + statusColor(m.status) + "33", borderRadius:12, padding:"14px" }}>
+            <div style={{ fontSize:9, letterSpacing:2, color:"#4a5568", fontFamily:"monospace", fontWeight:700, marginBottom:6 }}>{m.label}</div>
+            <div style={{ fontSize:20, fontWeight:900, color:statusColor(m.status), letterSpacing:-1, marginBottom:3 }}>{m.val}</div>
+            <div style={{ fontSize:9, color:"#2a3040", fontFamily:"sans-serif" }}>{m.target}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:16, padding:"18px", marginBottom:18 }}>
+        <div style={{ fontSize:10, letterSpacing:3, color:"#00e5a0", fontFamily:"monospace", fontWeight:700, marginBottom:14 }}>FULL MIX RECOMMENDATIONS</div>
+        {results.recs.map((r,i) => (
+          <div key={i} style={{ display:"flex", gap:12, alignItems:"flex-start", paddingBottom: i < results.recs.length-1 ? 13 : 0, marginBottom: i < results.recs.length-1 ? 13 : 0, borderBottom: i < results.recs.length-1 ? "1px solid #1a1f2e" : "none" }}>
+            <div style={{ width:6, height:6, borderRadius:"50%", background:prioColor(r.priority), marginTop:5, flexShrink:0 }} />
+            <div style={{ flex:1 }}>
+              <div style={{ fontSize:12, fontWeight:700, color:"#e8eaf0", fontFamily:"sans-serif", marginBottom:3 }}>{r.channel}</div>
+              <div style={{ fontSize:12, color:"#6b7280", fontFamily:"sans-serif", lineHeight:1.6 }}>{r.action}</div>
+            </div>
+            <div style={{ fontSize:9, color:prioColor(r.priority), fontFamily:"monospace", fontWeight:700, letterSpacing:1, flexShrink:0 }}>{r.priority.toUpperCase()}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:16, padding:"18px", marginBottom:18 }}>
+        <div style={{ fontSize:10, letterSpacing:3, color:"#4a7cff", fontFamily:"monospace", fontWeight:700, marginBottom:14 }}>MAIN LR GEQ SUGGESTIONS</div>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(70px,1fr))", gap:8 }}>
+          {results.geq.map((g,i) => {
+            const val = parseFloat(g.adj);
+            return (
+              <div key={i} style={{ background:"#060810", borderRadius:10, padding:"11px 6px", textAlign:"center", border:"1px solid " + (val>0 ? "rgba(0,229,160,0.2)" : val<0 ? "rgba(255,87,87,0.2)" : "#1a1f2e") }}>
+                <div style={{ fontSize:9, color:"#4a5568", fontFamily:"monospace", marginBottom:5 }}>{g.hz} Hz</div>
+                <div style={{ fontSize:16, fontWeight:900, color: val>0 ? "#00e5a0" : val<0 ? "#ff5757" : "#4a5568" }}>{g.adj}</div>
+                <div style={{ fontSize:8, color:"#2a3040", fontFamily:"sans-serif", marginTop:3 }}>{g.reason}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      <div style={{ background:"linear-gradient(135deg,rgba(0,229,160,0.07),rgba(0,229,160,0.02))", border:"1px solid rgba(0,229,160,0.25)", borderRadius:14, padding:"18px", marginBottom:20 }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:12 }}>
+          <div>
+            <div style={{ fontSize:13, fontWeight:700, color:"#00e5a0", fontFamily:"sans-serif", marginBottom:4 }}>Get the full PDF cheat sheet</div>
+            <div style={{ fontSize:12, color:"#6b7280", fontFamily:"sans-serif" }}>Formatted for {selectedMixer ? selectedMixer.name : "your mixer"} and printable. Pro feature.</div>
+          </div>
+          <button onClick={() => navigate("pricing")} style={{ background:"#00e5a0", color:"#07090f", border:"none", borderRadius:8, padding:"10px 20px", fontSize:13, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}>
+            Upgrade to Pro
+          </button>
+        </div>
+      </div>
+      <button onClick={reset} style={{ background:"transparent", border:"1px solid #1a1f2e", borderRadius:10, padding:"11px 22px", color:"#6b7280", fontSize:13, fontFamily:"sans-serif", cursor:"pointer" }}>
+        Analyze Another File
+      </button>
+    </div>
+  );
+}
+
+function InstrumentResults({ results, file, selectedMixer, navigate, reset, statusColor, prioColor }) {
+  const inst = results.instrument;
+  return (
+    <div style={{ animation:"fadein 0.4s ease" }}>
+      {/* Header badges */}
+      <div style={{ display:"flex", gap:10, flexWrap:"wrap", marginBottom:20 }}>
+        <div style={{ background: inst.color + "15", border:"1px solid " + inst.color + "40", borderRadius:8, padding:"6px 14px", fontSize:12, color: inst.color, fontFamily:"sans-serif", fontWeight:700 }}>
+          {inst.icon} {inst.name} Analysis
+        </div>
+        <div style={{ background:"rgba(0,229,160,0.08)", border:"1px solid rgba(0,229,160,0.2)", borderRadius:8, padding:"6px 14px", fontSize:12, color:"#00e5a0", fontFamily:"sans-serif", fontWeight:600 }}>
+          {selectedMixer ? selectedMixer.name : "Custom Mixer"}
+        </div>
+        <div style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:8, padding:"6px 14px", fontSize:12, color:"#6b7280", fontFamily:"sans-serif" }}>
+          {file ? file.name : ""}
+        </div>
+      </div>
+
+      {/* Metrics */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:10, marginBottom:20 }}>
+        {[
+          { label:"CHANNEL LEVEL", val: results.loudness.lufs + " LUFS", target:"Healthy: -20 to -12 LUFS", status: results.loudness.status },
+          { label:"TRUE PEAK", val: results.peak.db + " dBTP", target:"Target: below -1 dBTP", status: results.peak.status },
+          { label:"DYNAMIC RANGE", val: results.dynamic.range + " LU", target:"Instrument dynamics", status: results.dynamic.status },
+          { label:"STEREO WIDTH", val: results.stereo.width + "%", target:"Instrument stereo field", status: results.stereo.status },
+        ].map((m,i) => (
+          <div key={i} style={{ background:"#0d1017", border:"1px solid " + statusColor(m.status) + "33", borderRadius:12, padding:"14px" }}>
+            <div style={{ fontSize:9, letterSpacing:2, color:"#4a5568", fontFamily:"monospace", fontWeight:700, marginBottom:6 }}>{m.label}</div>
+            <div style={{ fontSize:20, fontWeight:900, color:statusColor(m.status), letterSpacing:-1, marginBottom:3 }}>{m.val}</div>
+            <div style={{ fontSize:9, color:"#2a3040", fontFamily:"sans-serif" }}>{m.target}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Channel EQ */}
+      <div style={{ background:"#0d1017", border:"1px solid " + inst.color + "30", borderRadius:16, padding:"18px", marginBottom:18 }}>
+        <div style={{ fontSize:10, letterSpacing:3, color: inst.color, fontFamily:"monospace", fontWeight:700, marginBottom:6 }}>
+          {inst.name.toUpperCase()} CHANNEL EQ
+        </div>
+        <div style={{ fontSize:11, color:"#4a5568", fontFamily:"sans-serif", marginBottom:14 }}>
+          {inst.channel} - HPF at {inst.hpf}
+        </div>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(70px,1fr))", gap:8 }}>
+          {inst.geq.map((g,i) => {
+            const val = parseFloat(g.adj);
+            return (
+              <div key={i} style={{ background:"#060810", borderRadius:10, padding:"11px 6px", textAlign:"center", border:"1px solid " + (val>0 ? inst.color + "40" : val<0 ? "rgba(255,87,87,0.2)" : "#1a1f2e") }}>
+                <div style={{ fontSize:9, color:"#4a5568", fontFamily:"monospace", marginBottom:5 }}>{g.hz} Hz</div>
+                <div style={{ fontSize:15, fontWeight:900, color: val>0 ? inst.color : val<0 ? "#ff5757" : "#4a5568" }}>{g.adj}</div>
+                <div style={{ fontSize:7, color:"#2a3040", fontFamily:"sans-serif", marginTop:3, lineHeight:1.3 }}>{g.reason}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Recommendations */}
+      <div style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:16, padding:"18px", marginBottom:18 }}>
+        <div style={{ fontSize:10, letterSpacing:3, color:"#00e5a0", fontFamily:"monospace", fontWeight:700, marginBottom:14 }}>
+          CHANNEL RECOMMENDATIONS
+        </div>
+        {results.recs.map((r,i) => (
+          <div key={i} style={{ display:"flex", gap:12, alignItems:"flex-start", paddingBottom: i<results.recs.length-1 ? 13 : 0, marginBottom: i<results.recs.length-1 ? 13 : 0, borderBottom: i<results.recs.length-1 ? "1px solid #1a1f2e" : "none" }}>
+            <div style={{ width:6, height:6, borderRadius:"50%", background:prioColor(r.priority), marginTop:5, flexShrink:0 }} />
+            <div style={{ flex:1 }}>
+              <div style={{ fontSize:12, fontWeight:700, color:"#e8eaf0", fontFamily:"sans-serif", marginBottom:3 }}>{r.channel}</div>
+              <div style={{ fontSize:12, color:"#6b7280", fontFamily:"sans-serif", lineHeight:1.6 }}>{r.action}</div>
+            </div>
+            <div style={{ fontSize:9, color:prioColor(r.priority), fontFamily:"monospace", fontWeight:700, letterSpacing:1, flexShrink:0 }}>{r.priority.toUpperCase()}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Pro Tip */}
+      <div style={{ background:"rgba(255,179,71,0.06)", border:"1px solid rgba(255,179,71,0.2)", borderRadius:14, padding:"16px 18px", marginBottom:18 }}>
+        <div style={{ fontSize:10, letterSpacing:3, color:"#ffb347", fontFamily:"monospace", fontWeight:700, marginBottom:8 }}>PRO TIP</div>
+        <div style={{ fontSize:13, color:"#c8d0e0", fontFamily:"sans-serif", lineHeight:1.6 }}>{results.proTip}</div>
+      </div>
+
+      {/* Upsell */}
+      <div style={{ background:"linear-gradient(135deg,rgba(74,124,255,0.07),rgba(74,124,255,0.02))", border:"1px solid rgba(74,124,255,0.25)", borderRadius:14, padding:"18px", marginBottom:20 }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:12 }}>
+          <div>
+            <div style={{ fontSize:13, fontWeight:700, color:"#4a7cff", fontFamily:"sans-serif", marginBottom:4 }}>Analyze all 10 instruments</div>
+            <div style={{ fontSize:12, color:"#6b7280", fontFamily:"sans-serif" }}>Pro users get unlimited per-instrument analysis plus PDF cheat sheets for every channel.</div>
+          </div>
+          <button onClick={() => navigate("pricing")} style={{ background:"linear-gradient(135deg,#4a7cff,#7c3aed)", color:"#fff", border:"none", borderRadius:8, padding:"10px 20px", fontSize:13, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}>
+            Upgrade to Pro
+          </button>
+        </div>
+      </div>
+
+      <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+        <button onClick={reset} style={{ background:"transparent", border:"1px solid #1a1f2e", borderRadius:10, padding:"11px 22px", color:"#6b7280", fontSize:13, fontFamily:"sans-serif", cursor:"pointer" }}>
+          Analyze Another
+        </button>
+        <button onClick={reset} style={{ background:"transparent", border:"1px solid rgba(74,124,255,0.3)", borderRadius:10, padding:"11px 22px", color:"#4a7cff", fontSize:13, fontFamily:"sans-serif", cursor:"pointer" }}>
+          Try Different Instrument
+        </button>
+      </div>
+    </div>
+  );
+}
 
   return (
     <div style={{ background:"#07090f", minHeight:"100vh", paddingTop:80, fontFamily:"Georgia,serif", color:"#e8eaf0" }}>
