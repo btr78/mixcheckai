@@ -3,6 +3,112 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 const STRIPE_PAYMENT_LINK = "https://buy.stripe.com/3cIcN6gBO375e6dbQkgbm03";
 const STRIPE_CONFIGURED = STRIPE_PAYMENT_LINK !== "YOUR_STRIPE_PAYMENT_LINK_HERE";
 
+// Pro unlock codes - add new ones here when someone pays
+// Format: "CODE": "customer-email-or-name"
+const PRO_CODES = {
+  "MIXPRO2026": "general",
+  "CHURCHPRO1": "general",
+  "SOUNDTECH1": "general",
+};
+
+function usePro() {
+  const [isPro, setIsPro] = useState(() => {
+    try { return localStorage.getItem("mixcheckai_pro") === "true"; } catch { return false; }
+  });
+  const [proName, setProName] = useState(() => {
+    try { return localStorage.getItem("mixcheckai_pro_name") || ""; } catch { return ""; }
+  });
+
+  const unlockPro = (code) => {
+    const trimmed = code.trim().toUpperCase();
+    if (PRO_CODES[trimmed]) {
+      try {
+        localStorage.setItem("mixcheckai_pro", "true");
+        localStorage.setItem("mixcheckai_pro_name", trimmed);
+      } catch {}
+      setIsPro(true);
+      setProName(trimmed);
+      return true;
+    }
+    return false;
+  };
+
+  const revokePro = () => {
+    try { localStorage.removeItem("mixcheckai_pro"); localStorage.removeItem("mixcheckai_pro_name"); } catch {}
+    setIsPro(false); setProName("");
+  };
+
+  return { isPro, proName, unlockPro, revokePro };
+}
+
+function ProUnlockModal({ onClose, onUnlock }) {
+  const [code, setCode] = useState("");
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState(false);
+
+  const handleSubmit = () => {
+    if (onUnlock(code)) {
+      setSuccess(true);
+      setTimeout(() => { onClose(); }, 2000);
+    } else {
+      setError("Invalid code. Check your email receipt or contact hello@mixcheckai.com");
+    }
+  };
+
+  return (
+    <div style={{
+      position:"fixed", inset:0, zIndex:200,
+      background:"rgba(0,0,0,0.85)", backdropFilter:"blur(8px)",
+      display:"flex", alignItems:"center", justifyContent:"center", padding:20,
+    }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background:"#0d1017", border:"1px solid #1a1f2e",
+        borderRadius:20, padding:"32px 28px", width:"100%", maxWidth:420,
+        position:"relative",
+      }}>
+        {success ? (
+          <div style={{ textAlign:"center", padding:"20px 0" }}>
+            <div style={{ fontSize:48, marginBottom:16 }}>🎉</div>
+            <div style={{ fontSize:20, fontWeight:900, color:"#00e5a0", marginBottom:8 }}>Pro Unlocked!</div>
+            <div style={{ fontSize:13, color:"#6b7280", fontFamily:"sans-serif" }}>Welcome to MixCheck AI Pro. Enjoy unlimited access!</div>
+          </div>
+        ) : (
+          <>
+            <button onClick={onClose} style={{ position:"absolute", top:16, right:16, background:"none", border:"none", color:"#4a5568", fontSize:18, cursor:"pointer" }}>x</button>
+            <div style={{ fontSize:10, letterSpacing:4, color:"#00e5a0", fontFamily:"monospace", fontWeight:700, marginBottom:12 }}>UNLOCK PRO</div>
+            <div style={{ fontSize:20, fontWeight:900, color:"#fff", marginBottom:8, letterSpacing:-0.5 }}>Enter your access code</div>
+            <div style={{ fontSize:13, color:"#6b7280", fontFamily:"sans-serif", lineHeight:1.6, marginBottom:24 }}>
+              Your Pro access code was sent to your email after payment. Check your inbox or spam folder.
+            </div>
+            <input
+              value={code}
+              onChange={e => { setCode(e.target.value.toUpperCase()); setError(""); }}
+              onKeyDown={e => e.key === "Enter" && handleSubmit()}
+              placeholder="e.g. MIXPRO2026"
+              style={{
+                width:"100%", background:"#060810", border:"1px solid " + (error ? "#ff5757" : "#1a1f2e"),
+                borderRadius:10, padding:"14px 16px", color:"#e8eaf0", fontSize:16,
+                fontFamily:"monospace", fontWeight:700, letterSpacing:2, outline:"none",
+                marginBottom: error ? 8 : 16, textTransform:"uppercase",
+              }}
+            />
+            {error && <div style={{ fontSize:12, color:"#ff5757", fontFamily:"sans-serif", marginBottom:16, lineHeight:1.5 }}>{error}</div>}
+            <button onClick={handleSubmit} disabled={!code.trim()} style={{
+              width:"100%", background: code.trim() ? "#00e5a0" : "#1a1f2e",
+              color: code.trim() ? "#07090f" : "#2a3040", border:"none", borderRadius:10,
+              padding:"14px", fontSize:14, fontFamily:"sans-serif", fontWeight:800, cursor: code.trim() ? "pointer" : "not-allowed",
+              marginBottom:16,
+            }}>Unlock Pro Access</button>
+            <div style={{ textAlign:"center", fontSize:12, color:"#4a5568", fontFamily:"sans-serif" }}>
+              No code? <a href={STRIPE_PAYMENT_LINK} target="_blank" rel="noopener noreferrer" style={{ color:"#00e5a0", textDecoration:"none" }}>Subscribe for $9.99 CAD/mo</a> or email <span style={{ color:"#00e5a0" }}>hello@mixcheckai.com</span>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function useRouter() {
   const getPage = () => window.location.hash.replace("#", "") || "home";
   const [page, setPage] = useState(getPage);
@@ -15,7 +121,7 @@ function useRouter() {
   return { page, navigate };
 }
 
-function Nav({ navigate, page }) {
+function Nav({ navigate, page, isPro, onUnlockClick }) {
   const [scrolled, setScrolled] = useState(false);
   useEffect(() => {
     const h = () => setScrolled(window.scrollY > 40);
@@ -45,11 +151,22 @@ function Nav({ navigate, page }) {
               fontSize:13, fontFamily:"sans-serif", fontWeight: page===p ? 600 : 400,
             }}>{label}</button>
           ))}
-          <button onClick={() => navigate("pricing")} style={{
-            background:"#00e5a0", color:"#07090f", border:"none",
-            borderRadius:8, padding:"8px 16px", fontSize:13,
-            fontFamily:"sans-serif", fontWeight:700, cursor:"pointer", marginLeft:4,
-          }}>Get Pro</button>
+          {isPro ? (
+            <div style={{
+              display:"flex", alignItems:"center", gap:6,
+              background:"rgba(0,229,160,0.1)", border:"1px solid rgba(0,229,160,0.3)",
+              borderRadius:8, padding:"6px 14px",
+            }}>
+              <div style={{ width:6, height:6, borderRadius:"50%", background:"#00e5a0" }} />
+              <span style={{ fontSize:12, color:"#00e5a0", fontFamily:"monospace", fontWeight:700 }}>PRO</span>
+            </div>
+          ) : (
+            <button onClick={onUnlockClick} style={{
+              background:"#00e5a0", color:"#07090f", border:"none",
+              borderRadius:8, padding:"8px 16px", fontSize:13,
+              fontFamily:"sans-serif", fontWeight:700, cursor:"pointer", marginLeft:4,
+            }}>Get Pro</button>
+          )}
         </div>
       </div>
       <style>{`
@@ -1454,16 +1571,49 @@ function PricingPage({ navigate }) {
   );
 }
 
-function SuccessPage({ navigate }) {
+function SuccessPage({ navigate, isPro, onUnlockClick }) {
   return (
     <div style={{ background:"#07090f", minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", padding:"40px 20px", fontFamily:"Georgia,serif" }}>
-      <div style={{ textAlign:"center", maxWidth:500 }}>
+      <div style={{ textAlign:"center", maxWidth:520 }}>
         <div style={{ fontSize:48, marginBottom:24 }}>🎉</div>
-        <h1 style={{ fontSize:"clamp(26px,4vw,40px)", fontWeight:900, margin:"0 0 14px", letterSpacing:-1.5, color:"#fff" }}>Welcome to Pro!</h1>
-        <p style={{ fontSize:15, color:"#6b7280", fontFamily:"sans-serif", lineHeight:1.7, marginBottom:32 }}>
-          Your subscription is active. Check your email for your receipt.
+        <h1 style={{ fontSize:"clamp(26px,4vw,40px)", fontWeight:900, margin:"0 0 14px", letterSpacing:-1.5, color:"#fff" }}>
+          Payment Successful!
+        </h1>
+        <p style={{ fontSize:15, color:"#6b7280", fontFamily:"sans-serif", lineHeight:1.7, marginBottom:28 }}>
+          Thank you for subscribing to MixCheck AI Pro! Check your email for your Pro access code, then tap the button below to unlock your account.
         </p>
-        <button onClick={() => navigate("analyze")} style={{ background:"#00e5a0", color:"#07090f", border:"none", borderRadius:10, padding:"13px 28px", fontSize:14, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer" }}>Start Analyzing</button>
+
+        {isPro ? (
+          <div style={{ background:"rgba(0,229,160,0.08)", border:"1px solid rgba(0,229,160,0.3)", borderRadius:14, padding:"20px", marginBottom:28 }}>
+            <div style={{ fontSize:14, fontWeight:700, color:"#00e5a0", fontFamily:"sans-serif", marginBottom:4 }}>Pro is Active!</div>
+            <div style={{ fontSize:13, color:"#6b7280", fontFamily:"sans-serif" }}>You have full access to all Pro features.</div>
+          </div>
+        ) : (
+          <div style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:14, padding:"20px", marginBottom:28 }}>
+            <div style={{ fontSize:10, letterSpacing:3, color:"#ffb347", fontFamily:"monospace", fontWeight:700, marginBottom:12 }}>NEXT STEP</div>
+            <div style={{ fontSize:14, color:"#e8eaf0", fontFamily:"sans-serif", fontWeight:600, marginBottom:8 }}>Enter your Pro access code</div>
+            <div style={{ fontSize:13, color:"#6b7280", fontFamily:"sans-serif", lineHeight:1.6, marginBottom:16 }}>
+              Check your email inbox for your access code from MixCheck AI. It arrives within a few minutes of payment.
+            </div>
+            <button onClick={onUnlockClick} style={{
+              width:"100%", background:"#00e5a0", color:"#07090f",
+              border:"none", borderRadius:10, padding:"13px",
+              fontSize:14, fontFamily:"sans-serif", fontWeight:800, cursor:"pointer",
+            }}>Enter My Access Code</button>
+            <div style={{ fontSize:12, color:"#4a5568", fontFamily:"sans-serif", marginTop:12 }}>
+              No email yet? Contact <span style={{ color:"#00e5a0" }}>hello@mixcheckai.com</span>
+            </div>
+          </div>
+        )}
+
+        <div style={{ display:"flex", gap:12, justifyContent:"center", flexWrap:"wrap" }}>
+          <button onClick={() => navigate("analyze")} style={{ background:"#00e5a0", color:"#07090f", border:"none", borderRadius:10, padding:"13px 28px", fontSize:14, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer" }}>
+            Start Analyzing
+          </button>
+          <button onClick={() => navigate("home")} style={{ background:"transparent", color:"#6b7280", border:"1px solid #1e2535", borderRadius:10, padding:"13px 28px", fontSize:14, fontFamily:"sans-serif", fontWeight:600, cursor:"pointer" }}>
+            Go Home
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -1471,20 +1621,38 @@ function SuccessPage({ navigate }) {
 
 export default function App() {
   const { page, navigate } = useRouter();
+  const { isPro, proName, unlockPro, revokePro } = usePro();
+  const [showUnlock, setShowUnlock] = useState(false);
+
+  // Auto-show unlock modal on success page
+  useEffect(() => {
+    if (page === "success" && !isPro) setShowUnlock(true);
+  }, [page, isPro]);
+
   const renderPage = () => {
     switch(page) {
-      case "home":    return <HomePage navigate={navigate} />;
-      case "analyze": return <AnalyzePage navigate={navigate} />;
-      case "pricing": return <PricingPage navigate={navigate} />;
-      case "success": return <SuccessPage navigate={navigate} />;
-      default:        return <HomePage navigate={navigate} />;
+      case "home":    return <HomePage navigate={navigate} isPro={isPro} onUnlockClick={() => setShowUnlock(true)} />;
+      case "analyze": return <AnalyzePage navigate={navigate} isPro={isPro} onUnlockClick={() => setShowUnlock(true)} />;
+      case "pricing": return <PricingPage navigate={navigate} isPro={isPro} onUnlockClick={() => setShowUnlock(true)} />;
+      case "success": return <SuccessPage navigate={navigate} isPro={isPro} onUnlockClick={() => setShowUnlock(true)} />;
+      default:        return <HomePage navigate={navigate} isPro={isPro} onUnlockClick={() => setShowUnlock(true)} />;
     }
   };
+
   return (
     <div>
-      <Nav navigate={navigate} page={page} />
+      <Nav navigate={navigate} page={page} isPro={isPro} onUnlockClick={() => setShowUnlock(true)} />
       {renderPage()}
       {page !== "success" && <Footer navigate={navigate} />}
+      {showUnlock && (
+        <ProUnlockModal
+          onClose={() => setShowUnlock(false)}
+          onUnlock={(code) => {
+            const ok = unlockPro(code);
+            return ok;
+          }}
+        />
+      )}
     </div>
   );
 }
