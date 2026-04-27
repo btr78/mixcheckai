@@ -156,20 +156,168 @@ function Footer({ navigate }) {
   );
 }
 
-// ── REAL AUDIO ANALYSIS ───────────────────────────────────────────────────────
+// ── REAL AUDIO ANALYSIS - smart sampling for long files ──────────────────────
 async function measureAudio(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error("Cannot read file"));
-    reader.onload = async (e) => {
+  return new Promise(function(resolve, reject) {
+    var reader = new FileReader();
+    reader.onerror = function() { reject(new Error("Cannot read file")); };
+    reader.onload = async function(e) {
       try {
-        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        var AudioCtx = window.AudioContext || window.webkitAudioContext;
         if (!AudioCtx) { reject(new Error("AudioContext not supported in this browser")); return; }
-        const ctx = new AudioCtx();
-        let buf;
+        var ctx = new AudioCtx();
+        var buf;
         try { buf = await ctx.decodeAudioData(e.target.result.slice(0)); }
-        catch { ctx.close(); reject(new Error("Cannot decode audio. Try MP3 or WAV.")); return; }
+        catch (decodeErr) { ctx.close(); reject(new Error("Cannot decode audio. Try MP3 or WAV.")); return; }
         ctx.close();
+
+        var sr = buf.sampleRate;
+        var numCh = buf.numberOfChannels;
+        var totalSamples = buf.getChannelData(0).length;
+        var totalDuration = Math.round(totalSamples / sr);
+
+        // For long files, analyze 3 representative slices instead of whole file
+        // Slice 1: first 3 min, Slice 2: middle 3 min, Slice 3: last 3 min
+        var sliceDuration = Math.min(180, Math.floor(totalDuration / 3)); // 3 min slices
+        var sliceSamples = sliceDuration * sr;
+
+        var slices = [];
+        if (totalDuration <= 600) {
+          // Under 10 min - use whole file
+          slices.push({ start: 0, end: totalSamples });
+        } else {
+          // Long file - use 3 slices
+          var midStart = Math.floor(totalSamples / 2) - Math.floor(sliceSamples / 2);
+          slices.push({ start: 0, end: sliceSamples });
+          slices.push({ start: Math.max(0, midStart), end: Math.min(totalSamples, midStart + sliceSamples) });
+          slices.push({ start: Math.max(0, totalSamples - sliceSamples), end: totalSamples });
+        }
+
+        // Extract sample data for each slice
+        var allL = [];
+        var allR = [];
+        for (var si = 0; si < slices.length; si++) {
+          var sl = slices[si];
+          var rawL = buf.getChannelData(0);
+          var rawR = numCh > 1 ? buf.getChannelData(1) : buf.getChannelData(0);
+          for (var idx = sl.start; idx < sl.end; idx++) {
+            allL.push(rawL[idx]);
+            allR.push(rawR[idx]);
+          }
+        }
+
+        var L = allL;
+        var R = allR;
+        var total = L.length;
+
+        if (total < sr * 1) { reject(new Error("File too short. Use a recording at least 5 seconds long.")); return; }
+
+        // Integrated Loudness (BS.1770 approx)
+        var blockLen = Math.floor(sr * 0.4);
+        var hop = Math.floor(blockLen * 0.75);
+        var loudBlocks = [];
+        for (var i = 0; i + blockLen <= total; i += hop) {
+          var sq = 0;
+          for (var j = i; j < i + blockLen; j++) sq += L[j]*L[j] + R[j]*R[j];
+          var rmsVal = Math.sqrt(sq / (blockLen * 2));
+          if (rmsVal > 0.0001) loudBlocks.push(rmsVal);
+        }
+        var gatedBlocks = loudBlocks.filter(function(rmsItem) { return (20*Math.log10(rmsItem)-0.691) > -70; });
+        var useBlocks = gatedBlocks.length > 0 ? gatedBlocks : loudBlocks;
+        var avgRMS = Math.sqrt(useBlocks.reduce(function(acc, rmsItem) { return acc + rmsItem*rmsItem; }, 0) / useBlocks.length);
+        var lufs = Math.round(Math.max(-50, Math.min(-3, 20*Math.log10(avgRMS)-0.691)) * 10) / 10;
+
+        // True Peak
+        var maxPk = 0;
+        var stride = Math.max(1, Math.floor(total/300000));
+        for (var i = 0; i < total; i += stride) {
+          var peakSample = Math.max(Math.abs(L[i]), Math.abs(R[i]));
+          if (peakSample > maxPk) maxPk = peakSample;
+        }
+        var peakDb = maxPk > 0 ? Math.round(20*Math.log10(maxPk)*10)/10 : -60;
+
+        // Dynamic Range
+        var segLen = Math.floor(sr * 1.0);
+        var segs = [];
+        for (var i = 0; i + segLen <= total; i += segLen) {
+          var sq = 0;
+          for (var j = i; j < i + segLen; j++) sq += L[j]*L[j];
+          var segRMS = Math.sqrt(sq/segLen);
+          if (segRMS > 0.0001) segs.push(20*Math.log10(segRMS));
+        }
+        segs.sort(function(x, y) { return y - x; });
+        var top10 = segs.slice(0, Math.max(1, Math.floor(segs.length*0.1)));
+        var bot10 = segs.slice(Math.max(0, Math.floor(segs.length*0.9)));
+        var top10avg = top10.reduce(function(acc, val) { return acc + val; }, 0) / top10.length;
+        var bot10avg = bot10.reduce(function(acc, val) { return acc + val; }, 0) / bot10.length;
+        var dynRange = Math.round(Math.max(2, Math.min(40, top10avg - bot10avg)) * 10) / 10;
+
+        // Stereo Width
+        var sumLR=0, sumL2=0, sumR2=0;
+        var st = Math.max(1, Math.floor(total/80000));
+        for (var i = 0; i < total; i += st) {
+          sumLR += L[i]*R[i];
+          sumL2 += L[i]*L[i];
+          sumR2 += R[i]*R[i];
+        }
+        var corrDenom = Math.sqrt(sumL2*sumR2);
+        var corr = corrDenom > 0 ? Math.max(-1, Math.min(1, sumLR/corrDenom)) : 1;
+        var stereoWidth = Math.round(Math.max(0, Math.min(1,(1-corr)/2))*100);
+
+        // Frequency bands (energy estimation)
+        var mid0 = Math.floor(total*0.3);
+        var mid1 = Math.floor(total*0.7);
+        var getBand = function(loHz, hiHz) {
+          var period = Math.max(2, Math.floor(sr/((hiHz+loHz)/2)));
+          var bandSq = 0, bandCount = 0;
+          for (var bi = mid0; bi + period < mid1; bi += period) {
+            var bandS = 0;
+            for (var bj = bi; bj < bi + period; bj++) bandS += Math.abs((L[bj]+R[bj])/2);
+            bandSq += (bandS/period)*(bandS/period);
+            bandCount++;
+          }
+          return bandCount > 0 ? 20*Math.log10(Math.sqrt(bandSq/bandCount)+0.000001) : -60;
+        };
+        var freq = {
+          sub: getBand(20,80), low: getBand(80,250), lowMid: getBand(250,600),
+          mid: getBand(600,2500), highMid: getBand(2500,7000),
+          high: getBand(7000,14000), air: getBand(14000,20000),
+        };
+
+        // Safety clamp
+        var safeVal = function(v, min, max, def) {
+          if (!isFinite(v) || isNaN(v)) return def;
+          return Math.max(min, Math.min(max, v));
+        };
+
+        resolve({
+          lufs: safeVal(lufs, -60, 0, -20),
+          peakDb: safeVal(peakDb, -60, 0, -6),
+          dynRange: safeVal(dynRange, 0, 50, 12),
+          stereoWidth: safeVal(stereoWidth, 0, 100, 50),
+          freq: {
+            sub: safeVal(freq.sub, -80, 0, -40),
+            low: safeVal(freq.low, -80, 0, -40),
+            lowMid: safeVal(freq.lowMid, -80, 0, -40),
+            mid: safeVal(freq.mid, -80, 0, -40),
+            highMid: safeVal(freq.highMid, -80, 0, -40),
+            high: safeVal(freq.high, -80, 0, -40),
+            air: safeVal(freq.air, -80, 0, -40),
+          },
+          duration: safeVal(totalDuration, 0, 99999, 0),
+          sampledDuration: totalDuration > 600 ? (sliceDuration * slices.length) : totalDuration,
+          isLongFile: totalDuration > 600,
+          sliceCount: slices.length,
+          sampleRate: sr || 44100,
+          channels: numCh || 1,
+          fileName: file.name,
+          fileSize: Math.round(file.size / 1024),
+        });
+      } catch(analysisErr) { reject(analysisErr); }
+    };
+    reader.readAsArrayBuffer(file);
+  });
+}
         const sr = buf.sampleRate;
         const numCh = buf.numberOfChannels;
         const L = buf.getChannelData(0);
@@ -180,24 +328,24 @@ async function measureAudio(file) {
         // Integrated Loudness (BS.1770 approx)
         const blockLen = Math.floor(sr * 0.4);
         const hop = Math.floor(blockLen * 0.75);
-        const blocks = [];
+        const loudBlocks = [];
         for (let i = 0; i + blockLen <= total; i += hop) {
           let sq = 0;
           for (let j = i; j < i + blockLen; j++) sq += L[j]*L[j] + R[j]*R[j];
-          const rms = Math.sqrt(sq / (blockLen * 2));
-          if (rms > 0.0001) blocks.push(rms);
+          const rmsVal = Math.sqrt(sq / (blockLen * 2));
+          if (rmsVal > 0.0001) loudBlocks.push(rmsVal);
         }
-        const gated = blocks.filter(r => (20*Math.log10(r)-0.691) > -70);
-        const use = gated.length > 0 ? gated : blocks;
-        const avgRMS = Math.sqrt(use.reduce((s,r) => s+r*r, 0) / use.length);
+        const gatedBlocks = loudBlocks.filter(function(rmsItem) { return (20*Math.log10(rmsItem)-0.691) > -70; });
+        const useBlocks = gatedBlocks.length > 0 ? gatedBlocks : loudBlocks;
+        const avgRMS = Math.sqrt(useBlocks.reduce(function(acc, rmsItem) { return acc + rmsItem*rmsItem; }, 0) / useBlocks.length);
         const lufs = Math.round(Math.max(-50, Math.min(-3, 20*Math.log10(avgRMS)-0.691)) * 10) / 10;
 
         // True Peak
         let maxPk = 0;
         const stride = Math.max(1, Math.floor(total/300000));
         for (let i = 0; i < total; i += stride) {
-          const s = Math.max(Math.abs(L[i]), Math.abs(R[i]));
-          if (s > maxPk) maxPk = s;
+          const peakSample = Math.max(Math.abs(L[i]), Math.abs(R[i]));
+          if (peakSample > maxPk) maxPk = peakSample;
         }
         const peakDb = maxPk > 0 ? Math.round(20*Math.log10(maxPk)*10)/10 : -60;
 
@@ -207,34 +355,41 @@ async function measureAudio(file) {
         for (let i = 0; i + segLen <= total; i += segLen) {
           let sq = 0;
           for (let j = i; j < i+segLen; j++) sq += L[j]*L[j];
-          const r = Math.sqrt(sq/segLen);
-          if (r > 0.0001) segs.push(20*Math.log10(r));
+          const segRMS = Math.sqrt(sq/segLen);
+          if (segRMS > 0.0001) segs.push(20*Math.log10(segRMS));
         }
-        segs.sort((a,b) => b-a);
-        const t10 = segs.slice(0, Math.max(1, Math.floor(segs.length*0.1)));
-        const b10 = segs.slice(Math.max(0, Math.floor(segs.length*0.9)));
-        const dynRange = Math.round(Math.max(2, Math.min(40, (t10.reduce((a,b)=>a+b,0)/t10.length) - (b10.reduce((a,b)=>a+b,0)/b10.length)))*10)/10;
+        segs.sort(function(x, y) { return y - x; });
+        const top10 = segs.slice(0, Math.max(1, Math.floor(segs.length*0.1)));
+        const bot10 = segs.slice(Math.max(0, Math.floor(segs.length*0.9)));
+        const top10avg = top10.reduce(function(acc, val) { return acc + val; }, 0) / top10.length;
+        const bot10avg = bot10.reduce(function(acc, val) { return acc + val; }, 0) / bot10.length;
+        const dynRange = Math.round(Math.max(2, Math.min(40, top10avg - bot10avg)) * 10) / 10;
 
         // Stereo Width
         let sumLR=0, sumL2=0, sumR2=0;
         const st = Math.max(1, Math.floor(total/80000));
-        for (let i = 0; i < total; i += st) { sumLR+=L[i]*R[i]; sumL2+=L[i]*L[i]; sumR2+=R[i]*R[i]; }
-        const denom = Math.sqrt(sumL2*sumR2);
-        const corr = denom > 0 ? Math.max(-1, Math.min(1, sumLR/denom)) : 1;
+        for (let i = 0; i < total; i += st) {
+          sumLR += L[i]*R[i];
+          sumL2 += L[i]*L[i];
+          sumR2 += R[i]*R[i];
+        }
+        const corrDenom = Math.sqrt(sumL2*sumR2);
+        const corr = corrDenom > 0 ? Math.max(-1, Math.min(1, sumLR/corrDenom)) : 1;
         const stereoWidth = Math.round(Math.max(0, Math.min(1,(1-corr)/2))*100);
 
         // Frequency bands (energy estimation)
         const mid0 = Math.floor(total*0.3);
         const mid1 = Math.floor(total*0.7);
-        const getBand = (lo, hi) => {
-          const period = Math.max(2, Math.floor(sr/((hi+lo)/2)));
-          let sq=0, count=0;
-          for (let i=mid0; i+period < mid1; i+=period) {
-            let s=0;
-            for (let j=i; j<i+period; j++) s+=Math.abs((L[j]+R[j])/2);
-            sq+=(s/period)*(s/period); count++;
+        const getBand = function(loHz, hiHz) {
+          const period = Math.max(2, Math.floor(sr/((hiHz+loHz)/2)));
+          var bandSq = 0, bandCount = 0;
+          for (var bi = mid0; bi + period < mid1; bi += period) {
+            var bandS = 0;
+            for (var bj = bi; bj < bi + period; bj++) bandS += Math.abs((L[bj]+R[bj])/2);
+            bandSq += (bandS/period)*(bandS/period);
+            bandCount++;
           }
-          return count>0 ? 20*Math.log10(Math.sqrt(sq/count)+0.000001) : -60;
+          return bandCount > 0 ? 20*Math.log10(Math.sqrt(bandSq/bandCount)+0.000001) : -60;
         };
         const freq = {
           sub: getBand(20,80), low: getBand(80,250), lowMid: getBand(250,600),
@@ -546,18 +701,20 @@ function AnalyzePage({ navigate, isPro, onUnlockClick }) {
       setResults({ error:"This file type is not supported. Please upload an audio file: MP3, WAV, AAC, M4A, or FLAC." });
       setStep(3); return;
     }
-    if (f.size > 200 * 1024 * 1024) {
-      setResults({ error:"File is too large (max 200MB). Try exporting a shorter section." });
+    if (f.size > 500 * 1024 * 1024) {
+      setResults({ error:"File is too large (max 500MB). For a 2-hour service, export as MP3 at 128kbps - it will be under 100MB and analyze perfectly." });
       setStep(3); return;
     }
     setFile(f); setAnalyzing(true); setResults(null);
+    var fileMB = Math.round(f.size / 1024 / 1024);
+    var isLarge = fileMB > 30;
     try {
-      setAnalyzeStatus("Reading audio file...");
-      await new Promise(r => setTimeout(r, 50));
-      setAnalyzeStatus("Measuring loudness and peak levels...");
+      setAnalyzeStatus("Reading audio file" + (isLarge ? " (" + fileMB + "MB - this may take a moment)..." : "..."));
+      await new Promise(function(r) { setTimeout(r, 50); });
+      setAnalyzeStatus(isLarge ? "Decoding audio - analyzing key sections of your recording..." : "Measuring loudness and peak levels...");
       const m = await measureAudio(f);
       setAnalyzeStatus("Analyzing frequency balance...");
-      await new Promise(r => setTimeout(r, 100));
+      await new Promise(function(r) { setTimeout(r, 100); });
       setAnalyzeStatus("Generating recommendations...");
       const recs = generateGeneralRecs(
         (m.lufs !== undefined && m.lufs !== null ? m.lufs : -20),
@@ -700,6 +857,11 @@ function AnalyzePage({ navigate, isPro, onUnlockClick }) {
                   {results.mixer && <div style={{ background:"rgba(0,229,160,0.08)", border:"1px solid rgba(0,229,160,0.2)", borderRadius:8, padding:"6px 14px", fontSize:12, color:"#00e5a0", fontFamily:"sans-serif", fontWeight:600 }}>{results.mixer.name}</div>}
                   <div style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:8, padding:"6px 14px", fontSize:12, color:"#6b7280", fontFamily:"sans-serif" }}>{(file && file.name ? file.name : "")}</div>
                   {results.duration && <div style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:8, padding:"6px 14px", fontSize:12, color:"#6b7280", fontFamily:"sans-serif" }}>{Math.floor(results.duration/60)}m {results.duration%60}s</div>}
+                  {results.isLongFile && (
+                    <div style={{ background:"rgba(255,179,71,0.1)", border:"1px solid rgba(255,179,71,0.3)", borderRadius:8, padding:"6px 14px", fontSize:11, color:"#ffb347", fontFamily:"sans-serif" }}>
+                      Analyzed {results.sliceCount} key sections of long recording
+                    </div>
+                  )}
                   {isPro && (
                     <button onClick={() => generatePDF(results, (file && file.name ? file.name : "recording"))}
                       style={{ background:"linear-gradient(135deg,#4a7cff,#7c3aed)", color:"#fff", border:"none", borderRadius:8, padding:"6px 14px", fontSize:12, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer" }}>
