@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 
-const STRIPE_PAYMENT_LINK = "YOUR_STRIPE_PAYMENT_LINK_HERE";
+const STRIPE_PAYMENT_LINK = "https://buy.stripe.com/3cIcN6gBO375e6dbQkgbm03";
 const STRIPE_CONFIGURED = STRIPE_PAYMENT_LINK !== "YOUR_STRIPE_PAYMENT_LINK_HERE";
 
 function useRouter() {
