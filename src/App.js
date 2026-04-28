@@ -4,6 +4,7 @@ const STRIPE_PAYMENT_LINK = "https://buy.stripe.com/3cIcN6gBO375e6dbQkgbm03";
 
 // ── STRIPE PAYMENT LINKS ──────────────────────────────────────────────────────
 const STRIPE_TEAM_LINK = "https://buy.stripe.com/3cIcN6gBO375e6dbQkgbm03"; // replace with team plan link
+const STRIPE_PORTAL_LINK = "https://billing.stripe.com/p/login/fZu9AU2KY3757HP4nSgbm00";
 
 // ── MIX SCORE ─────────────────────────────────────────────────────────────────
 function calcMixScore(lufs, peakDb, dynRange, stereoWidth) {
@@ -552,6 +553,10 @@ function Footer({ navigate }) {
           {[["home","Home"],["pricing","Pricing"],["analyze","Analyze Free"]].map(function(item) {
             return <button key={item[0]} onClick={function() { navigate(item[0]); }} style={{ background:"none", border:"none", cursor:"pointer", fontSize:12, color:"#4a5568", fontFamily:"sans-serif" }}>{item[1]}</button>;
           })}
+          <a href={STRIPE_PORTAL_LINK} target="_blank" rel="noopener noreferrer"
+            style={{ fontSize:12, color:"#4a5568", fontFamily:"sans-serif", textDecoration:"none" }}>
+            Manage Subscription
+          </a>
         </div>
         <p style={{ fontSize:11, color:"#1a1f2e", fontFamily:"monospace", letterSpacing:1, margin:0 }}>2026 MIXCHECK AI</p>
       </div>
@@ -1858,7 +1863,13 @@ function PricingPage({ navigate, isPro, onUnlockClick }) {
             <div style={{ fontSize:48, marginBottom:16 }}>🎉</div>
             <div style={{ fontSize:24, fontWeight:900, color:"#00e5a0", marginBottom:8, fontFamily:"sans-serif" }}>You are on Pro!</div>
             <div style={{ fontSize:15, color:"#6b7280", fontFamily:"sans-serif", lineHeight:1.6, marginBottom:24 }}>You have full access to all Pro features including unlimited uploads and PDF reports.</div>
-            <button onClick={function() { navigate("analyze"); }} style={{ background:"#00e5a0", color:"#07090f", border:"none", borderRadius:10, padding:"13px 32px", fontSize:14, fontFamily:"sans-serif", fontWeight:800, cursor:"pointer" }}>Go Analyze a Mix</button>
+            <div style={{ display:"flex", gap:12, justifyContent:"center", flexWrap:"wrap" }}>
+              <button onClick={function() { navigate("analyze"); }} style={{ background:"#00e5a0", color:"#07090f", border:"none", borderRadius:10, padding:"13px 32px", fontSize:14, fontFamily:"sans-serif", fontWeight:800, cursor:"pointer" }}>Go Analyze a Mix</button>
+              <a href={STRIPE_PORTAL_LINK} target="_blank" rel="noopener noreferrer"
+                style={{ background:"transparent", color:"#6b7280", border:"1px solid #1a1f2e", borderRadius:10, padding:"13px 24px", fontSize:14, fontFamily:"sans-serif", fontWeight:600, cursor:"pointer", textDecoration:"none", display:"inline-flex", alignItems:"center" }}>
+                Manage / Cancel Subscription
+              </a>
+            </div>
           </div>
         ) : (
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))", gap:20, marginBottom:52 }}>
@@ -1951,6 +1962,10 @@ function SuccessPage({ navigate, isPro, onUnlockClick }) {
         <div style={{ display:"flex", gap:12, justifyContent:"center", flexWrap:"wrap" }}>
           <button onClick={function() { navigate("analyze"); }} style={{ background:"#00e5a0", color:"#07090f", border:"none", borderRadius:10, padding:"13px 28px", fontSize:14, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer" }}>Start Analyzing</button>
           <button onClick={function() { navigate("home"); }} style={{ background:"transparent", color:"#6b7280", border:"1px solid #1e2535", borderRadius:10, padding:"13px 28px", fontSize:14, fontFamily:"sans-serif", fontWeight:600, cursor:"pointer" }}>Go Home</button>
+          <a href={STRIPE_PORTAL_LINK} target="_blank" rel="noopener noreferrer"
+            style={{ background:"transparent", color:"#4a5568", border:"1px solid #1a1f2e", borderRadius:10, padding:"13px 24px", fontSize:13, fontFamily:"sans-serif", fontWeight:600, textDecoration:"none", display:"inline-flex", alignItems:"center" }}>
+            Manage Subscription
+          </a>
         </div>
       </div>
     </div>
