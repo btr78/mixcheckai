@@ -238,101 +238,125 @@ function HistoryPage({ navigate }) {
 }
 
 // ── AI CHAT ASSISTANT ─────────────────────────────────────────────────────────
+var FREE_CHAT_LIMIT = 5; // free users get 5 messages per day
+
+function getChatUsage() {
+  try {
+    var data = JSON.parse(localStorage.getItem("mca_chat_usage") || "{}");
+    var today = new Date().toDateString();
+    return data.day === today ? (data.count || 0) : 0;
+  } catch(e) { return 0; }
+}
+
+function incrementChatUsage() {
+  try {
+    var today = new Date().toDateString();
+    var data = JSON.parse(localStorage.getItem("mca_chat_usage") || "{}");
+    var count = data.day === today ? (data.count || 0) + 1 : 1;
+    localStorage.setItem("mca_chat_usage", JSON.stringify({ day: today, count: count }));
+    return count;
+  } catch(e) { return 1; }
+}
+
 function AIChatPage({ isPro, onUnlockClick }) {
   var msgsState = useState([{
     role:"assistant",
-    text:"Hi! I am your MixCheck AI audio assistant. Ask me anything about your livestream mix, EQ, compression, effects, or mixer settings. For best results, tell me what mixer you use and what problem you are hearing."
+    content:"Hi! I am your MixCheck AI audio assistant. Ask me anything about your livestream mix, EQ, compression, effects, or mixer settings. Tell me what mixer you use and what problem you are hearing for the best advice."
   }]);
   var msgs = msgsState[0]; var setMsgs = msgsState[1];
   var inputState = useState(""); var input = inputState[0]; var setInput = inputState[1];
   var loadingState = useState(false); var loading = loadingState[0]; var setLoading = loadingState[1];
+  var usageState = useState(getChatUsage); var chatUsage = usageState[0]; var setChatUsage = usageState[1];
   var bottomRef = useRef();
 
   useEffect(function() {
     if (bottomRef.current) bottomRef.current.scrollIntoView({ behavior:"smooth" });
   }, [msgs]);
 
+  var remaining = isPro ? 999 : Math.max(0, FREE_CHAT_LIMIT - chatUsage);
+  var isLimited = !isPro && chatUsage >= FREE_CHAT_LIMIT;
+
   var send = async function() {
-    if (!input.trim() || loading) return;
-    var userMsg = input.trim();
+    if (!input.trim() || loading || isLimited) return;
+    var userText = input.trim();
     setInput("");
-    var newMsgs = msgs.concat([{ role:"user", text:userMsg }]);
+
+    var newMsgs = msgs.concat([{ role:"user", content: userText }]);
     setMsgs(newMsgs);
     setLoading(true);
 
-    try {
-      var history = newMsgs.map(function(m) {
-        return { role: m.role === "assistant" ? "assistant" : "user", content: m.text };
-      });
+    // Build message history for the API (last 10 only to save cost)
+    var apiMessages = newMsgs.slice(-10).map(function(m) {
+      return { role: m.role, content: m.content };
+    });
 
-      var response = await fetch("https://api.anthropic.com/v1/messages", {
-        method:"POST",
-        headers:{ "Content-Type":"application/json" },
+    try {
+      var response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model:"claude-sonnet-4-20250514",
-          max_tokens:1000,
-          system:"You are MixCheck AI, an expert live sound engineer assistant specializing in church and studio livestream audio. You help volunteer sound engineers get better audio for their streams. Keep answers concise, practical and in plain English. No jargon unless you explain it. Focus on actionable advice. When giving EQ or compression settings always give ranges, not fixed values. Be encouraging - most users are volunteers not professionals.",
-          messages: history
-        })
+          messages: apiMessages,
+          isPro: isPro,
+        }),
       });
 
       var data = await response.json();
-      var reply = data.content && data.content[0] ? data.content[0].text : "Sorry, I could not get a response. Please try again.";
-      setMsgs(function(prev) { return prev.concat([{ role:"assistant", text:reply }]); });
+
+      if (!response.ok || data.error) {
+        setMsgs(function(prev) {
+          return prev.concat([{ role:"assistant", content: data.error || "Something went wrong. Please try again." }]);
+        });
+      } else {
+        setMsgs(function(prev) {
+          return prev.concat([{ role:"assistant", content: data.reply }]);
+        });
+        // Increment usage for free users
+        if (!isPro) {
+          var newCount = incrementChatUsage();
+          setChatUsage(newCount);
+        }
+      }
     } catch(err) {
-      setMsgs(function(prev) { return prev.concat([{ role:"assistant", text:"Connection error. Please check your internet and try again." }]); });
+      setMsgs(function(prev) {
+        return prev.concat([{ role:"assistant", content:"Connection error. Please check your internet and try again." }]);
+      });
     }
     setLoading(false);
   };
 
   var suggestions = [
     "Why does my stream sound quiet even when the room is loud?",
-    "How do I set up a separate stream mix on my QU-24?",
     "My vocals sound muddy on stream. What should I cut?",
     "What compression settings work for a live worship vocal?",
     "How do I stop feedback without ruining the stream mix?",
+    "What is -16 LUFS and how do I hit it?",
   ];
-
-  if (!isPro) {
-    return (
-      <div style={{ background:"#07090f", minHeight:"100vh", paddingTop:80, fontFamily:"Georgia,serif", color:"#e8eaf0" }}>
-        <div style={{ maxWidth:680, margin:"0 auto", padding:"40px 20px", textAlign:"center" }}>
-          <div style={{ fontSize:48, marginBottom:20 }}>🤖</div>
-          <div style={{ fontSize:10, letterSpacing:4, color:"#4a7cff", fontFamily:"monospace", fontWeight:700, marginBottom:14 }}>AI ASSISTANT</div>
-          <h1 style={{ fontSize:"clamp(22px,4vw,34px)", fontWeight:900, margin:"0 0 16px", letterSpacing:-1.5, color:"#fff" }}>Ask an Audio Expert</h1>
-          <p style={{ fontSize:14, color:"#6b7280", fontFamily:"sans-serif", lineHeight:1.7, marginBottom:28, maxWidth:460, margin:"0 auto 28px" }}>
-            The MixCheck AI Assistant answers your specific mix questions in real time. Ask about EQ, compression, effects, routing, problem-solving - anything audio.
-          </p>
-          <div style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:16, padding:"20px", marginBottom:28, textAlign:"left" }}>
-            <div style={{ fontSize:11, color:"#4a5568", fontFamily:"sans-serif", marginBottom:12 }}>Example questions:</div>
-            {suggestions.map(function(s, i) {
-              return <div key={i} style={{ fontSize:13, color:"#8892a4", fontFamily:"sans-serif", padding:"8px 0", borderBottom:i<suggestions.length-1?"1px solid #1a1f2e":"none" }}>"{s}"</div>;
-            })}
-          </div>
-          <button onClick={onUnlockClick} style={{ background:"linear-gradient(135deg,#4a7cff,#7c3aed)", color:"#fff", border:"none", borderRadius:10, padding:"14px 32px", fontSize:15, fontFamily:"sans-serif", fontWeight:800, cursor:"pointer" }}>
-            Unlock Pro to Chat - $9.99 CAD/mo
-          </button>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div style={{ background:"#07090f", minHeight:"100vh", paddingTop:80, fontFamily:"Georgia,serif", color:"#e8eaf0", display:"flex", flexDirection:"column" }}>
       <div style={{ maxWidth:780, margin:"0 auto", width:"100%", padding:"20px 20px 0", flex:1, display:"flex", flexDirection:"column" }}>
-        <div style={{ marginBottom:16 }}>
-          <div style={{ fontSize:10, letterSpacing:4, color:"#4a7cff", fontFamily:"monospace", fontWeight:700, marginBottom:6 }}>AI ASSISTANT</div>
-          <div style={{ fontSize:20, fontWeight:900, color:"#fff", letterSpacing:-0.5, fontFamily:"sans-serif" }}>Ask me anything about your mix 🤖</div>
+
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:16, flexWrap:"wrap", gap:10 }}>
+          <div>
+            <div style={{ fontSize:10, letterSpacing:4, color:"#4a7cff", fontFamily:"monospace", fontWeight:700, marginBottom:6 }}>AI ASSISTANT</div>
+            <div style={{ fontSize:20, fontWeight:900, color:"#fff", letterSpacing:-0.5, fontFamily:"sans-serif" }}>Ask me anything about your mix 🤖</div>
+          </div>
+          {!isPro && (
+            <div style={{ background:"rgba(255,87,87,0.08)", border:"1px solid rgba(255,87,87,0.2)", borderRadius:10, padding:"8px 14px", textAlign:"right" }}>
+              <div style={{ fontSize:12, color: remaining > 1 ? "#ffb347" : "#ff5757", fontFamily:"sans-serif", fontWeight:600 }}>{remaining} free messages today</div>
+              <button onClick={onUnlockClick} style={{ fontSize:11, color:"#00e5a0", background:"none", border:"none", cursor:"pointer", fontFamily:"sans-serif", padding:0, marginTop:2 }}>Upgrade for unlimited</button>
+            </div>
+          )}
         </div>
 
-        <div style={{ flex:1, overflowY:"auto", paddingBottom:16, minHeight:300, maxHeight:"60vh" }}>
+        <div style={{ flex:1, overflowY:"auto", paddingBottom:16, minHeight:280, maxHeight:"58vh" }}>
           {msgs.map(function(m, i) {
             var isAI = m.role === "assistant";
             return (
               <div key={i} style={{ display:"flex", justifyContent: isAI?"flex-start":"flex-end", marginBottom:12 }}>
                 <div style={{ maxWidth:"82%", background: isAI?"#0d1017":"rgba(0,229,160,0.1)", border:"1px solid "+(isAI?"#1a1f2e":"rgba(0,229,160,0.25)"), borderRadius: isAI?"4px 14px 14px 14px":"14px 4px 14px 14px", padding:"12px 16px" }}>
                   {isAI && <div style={{ fontSize:10, color:"#00e5a0", fontFamily:"monospace", fontWeight:700, marginBottom:6 }}>MIXCHECK AI</div>}
-                  <div style={{ fontSize:13, color:"#e8eaf0", fontFamily:"sans-serif", lineHeight:1.7, whiteSpace:"pre-wrap" }}>{m.text}</div>
+                  <div style={{ fontSize:13, color:"#e8eaf0", fontFamily:"sans-serif", lineHeight:1.7, whiteSpace:"pre-wrap" }}>{m.content}</div>
                 </div>
               </div>
             );
@@ -351,7 +375,7 @@ function AIChatPage({ isPro, onUnlockClick }) {
 
         {msgs.length <= 1 && (
           <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:12 }}>
-            {suggestions.slice(0,3).map(function(s, i) {
+            {suggestions.slice(0, isPro ? 5 : 3).map(function(s, i) {
               return (
                 <button key={i} onClick={function() { setInput(s); }}
                   style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:8, padding:"8px 12px", fontSize:11, color:"#6b7280", fontFamily:"sans-serif", cursor:"pointer", textAlign:"left" }}>
@@ -362,26 +386,27 @@ function AIChatPage({ isPro, onUnlockClick }) {
           </div>
         )}
 
+        {isLimited && (
+          <div style={{ background:"rgba(255,87,87,0.08)", border:"1px solid rgba(255,87,87,0.25)", borderRadius:12, padding:"14px 18px", marginBottom:12, display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:10 }}>
+            <div style={{ fontSize:13, color:"#ff5757", fontFamily:"sans-serif" }}>You have used your {FREE_CHAT_LIMIT} free messages today. Resets tomorrow or upgrade for unlimited.</div>
+            <button onClick={onUnlockClick} style={{ background:"linear-gradient(135deg,#4a7cff,#7c3aed)", color:"#fff", border:"none", borderRadius:8, padding:"9px 18px", fontSize:12, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}>Unlock Pro</button>
+          </div>
+        )}
+
         <div style={{ display:"flex", gap:10, paddingBottom:20 }}>
           <input
             value={input}
             onChange={function(e) { setInput(e.target.value); }}
             onKeyDown={function(e) { if(e.key==="Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
-            placeholder="Ask about EQ, compression, routing, effects..."
-            style={{ flex:1, background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:12, padding:"13px 16px", color:"#e8eaf0", fontSize:14, fontFamily:"sans-serif", outline:"none" }}
+            placeholder={isLimited ? "Upgrade to Pro for unlimited messages..." : "Ask about EQ, compression, routing, effects..."}
+            disabled={isLimited}
+            style={{ flex:1, background: isLimited?"#060810":"#0d1017", border:"1px solid "+(isLimited?"#1a1f2e":"#2a3040"), borderRadius:12, padding:"13px 16px", color: isLimited?"#2a3040":"#e8eaf0", fontSize:14, fontFamily:"sans-serif", outline:"none" }}
           />
-          <button onClick={send} disabled={!input.trim() || loading}
-            style={{ background: input.trim()&&!loading?"#00e5a0":"#1a1f2e", color: input.trim()&&!loading?"#07090f":"#2a3040", border:"none", borderRadius:12, padding:"13px 20px", fontSize:14, fontFamily:"sans-serif", fontWeight:700, cursor: input.trim()&&!loading?"pointer":"not-allowed", whiteSpace:"nowrap" }}>
-            Send
+          <button onClick={send} disabled={!input.trim() || loading || isLimited}
+            style={{ background: (input.trim()&&!loading&&!isLimited)?"#00e5a0":"#1a1f2e", color: (input.trim()&&!loading&&!isLimited)?"#07090f":"#2a3040", border:"none", borderRadius:12, padding:"13px 20px", fontSize:14, fontFamily:"sans-serif", fontWeight:700, cursor: (input.trim()&&!loading&&!isLimited)?"pointer":"not-allowed", whiteSpace:"nowrap" }}>
+            {loading ? "..." : "Send"}
           </button>
         </div>
-      </div>
-    </div>
-  );
-}
-
-
-
 const VALID_CODE_HASHES = [
   btoa("MIXPRO2026"),
   btoa("CHURCHPRO1"),
