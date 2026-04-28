@@ -407,6 +407,11 @@ function AIChatPage({ isPro, onUnlockClick }) {
             {loading ? "..." : "Send"}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
 const VALID_CODE_HASHES = [
   btoa("MIXPRO2026"),
   btoa("CHURCHPRO1"),
