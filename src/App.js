@@ -2,6 +2,386 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 
 const STRIPE_PAYMENT_LINK = "https://buy.stripe.com/3cIcN6gBO375e6dbQkgbm03";
 
+// ── STRIPE PAYMENT LINKS ──────────────────────────────────────────────────────
+const STRIPE_TEAM_LINK = "https://buy.stripe.com/3cIcN6gBO375e6dbQkgbm03"; // replace with team plan link
+
+// ── MIX SCORE ─────────────────────────────────────────────────────────────────
+function calcMixScore(lufs, peakDb, dynRange, stereoWidth) {
+  var score = 100;
+  // Loudness (30 pts)
+  var lufsTarget = -16;
+  var lufsDiff = Math.abs((isFinite(lufs) ? lufs : -20) - lufsTarget);
+  var lufsScore = Math.max(0, 30 - lufsDiff * 4);
+  // Peak (20 pts)
+  var peakScore = 20;
+  if (peakDb > 0) peakScore = 0;
+  else if (peakDb > -1) peakScore = 5;
+  else if (peakDb > -3) peakScore = 12;
+  else if (peakDb > -6) peakScore = 20;
+  else peakScore = 14;
+  // Dynamics (25 pts)
+  var dr = isFinite(dynRange) ? dynRange : 12;
+  var dynScore = 0;
+  if (dr >= 8 && dr <= 14) dynScore = 25;
+  else if (dr >= 6 && dr <= 16) dynScore = 18;
+  else if (dr >= 4 && dr <= 20) dynScore = 10;
+  else dynScore = 4;
+  // Stereo (25 pts)
+  var sw = isFinite(stereoWidth) ? stereoWidth : 50;
+  var stereoScore = 0;
+  if (sw >= 20 && sw <= 75) stereoScore = 25;
+  else if (sw >= 10 && sw <= 85) stereoScore = 16;
+  else stereoScore = 8;
+  var total = Math.round(lufsScore + peakScore + dynScore + stereoScore);
+  return Math.max(0, Math.min(100, total));
+}
+
+function getScoreLabel(score) {
+  if (score >= 90) return { label:"Excellent", color:"#00e5a0", emoji:"🏆" };
+  if (score >= 75) return { label:"Good", color:"#4a7cff", emoji:"✅" };
+  if (score >= 55) return { label:"Needs Work", color:"#ffb347", emoji:"⚠" };
+  return { label:"Needs Attention", color:"#ff5757", emoji:"🔴" };
+}
+
+// ── SESSION HISTORY ───────────────────────────────────────────────────────────
+function loadHistory() {
+  try {
+    var raw = localStorage.getItem("mca_history");
+    return raw ? JSON.parse(raw) : [];
+  } catch(e) { return []; }
+}
+
+function saveToHistory(entry) {
+  try {
+    var history = loadHistory();
+    history.unshift(entry);
+    if (history.length > 20) history = history.slice(0, 20);
+    localStorage.setItem("mca_history", JSON.stringify(history));
+  } catch(e) {}
+}
+
+function clearHistory() {
+  try { localStorage.removeItem("mca_history"); } catch(e) {}
+}
+
+// ── USAGE COUNTER ─────────────────────────────────────────────────────────────
+function getUsageCount() {
+  try {
+    var data = JSON.parse(localStorage.getItem("mca_usage") || "{}");
+    var month = new Date().getFullYear() + "-" + new Date().getMonth();
+    return data.month === month ? (data.count || 0) : 0;
+  } catch(e) { return 0; }
+}
+
+function incrementUsage() {
+  try {
+    var month = new Date().getFullYear() + "-" + new Date().getMonth();
+    var data = JSON.parse(localStorage.getItem("mca_usage") || "{}");
+    var count = data.month === month ? (data.count || 0) + 1 : 1;
+    localStorage.setItem("mca_usage", JSON.stringify({ month: month, count: count }));
+    return count;
+  } catch(e) { return 1; }
+}
+
+var FREE_LIMIT = 3;
+
+// ── SUNDAY CHECKLIST ──────────────────────────────────────────────────────────
+var CHECKLIST_ITEMS = [
+  { id:"hpf",    text:"HPF applied on all channels (except kick and bass)" },
+  { id:"stream", text:"Stream send is a separate aux/mix bus from FOH" },
+  { id:"limiter",text:"Master limiter is active on your stream output" },
+  { id:"mono",   text:"Checked mix in mono on a phone speaker" },
+  { id:"gain",   text:"All channel gains set before the service (not during)" },
+  { id:"vocal",  text:"Lead vocal level checked and sitting above the instruments" },
+  { id:"comp",   text:"Bus compressor active on stream output" },
+  { id:"levels", text:"Stream output level peaking around -6 to -3 dBFS" },
+];
+
+function SundayChecklist() {
+  var savedState = useState(function() {
+    try { return JSON.parse(localStorage.getItem("mca_checklist") || "{}"); }
+    catch(e) { return {}; }
+  });
+  var checked = savedState[0]; var setChecked = savedState[1];
+
+  var toggle = function(id) {
+    var next = Object.assign({}, checked);
+    next[id] = !next[id];
+    setChecked(next);
+    try { localStorage.setItem("mca_checklist", JSON.stringify(next)); } catch(e) {}
+  };
+
+  var resetAll = function() {
+    setChecked({});
+    try { localStorage.removeItem("mca_checklist"); } catch(e) {}
+  };
+
+  var doneCount = CHECKLIST_ITEMS.filter(function(item) { return checked[item.id]; }).length;
+  var pct = Math.round((doneCount / CHECKLIST_ITEMS.length) * 100);
+  var allDone = doneCount === CHECKLIST_ITEMS.length;
+
+  return (
+    <div style={{ background:"#07090f", minHeight:"100vh", paddingTop:80, fontFamily:"Georgia,serif", color:"#e8eaf0" }}>
+      <div style={{ maxWidth:680, margin:"0 auto", padding:"40px 20px" }}>
+        <div style={{ marginBottom:28 }}>
+          <div style={{ fontSize:10, letterSpacing:4, color:"#00e5a0", fontFamily:"monospace", fontWeight:700, marginBottom:10 }}>SUNDAY CHECKLIST</div>
+          <h1 style={{ fontSize:"clamp(22px,4vw,34px)", fontWeight:900, margin:"0 0 8px", letterSpacing:-1.5, color:"#fff" }}>Pre-Service Checklist</h1>
+          <p style={{ fontSize:13, color:"#6b7280", fontFamily:"sans-serif", margin:0 }}>Run through this before every service. Saves you from 90% of stream problems.</p>
+        </div>
+
+        <div style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:14, padding:"16px 20px", marginBottom:24 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+            <div style={{ fontSize:12, color:"#6b7280", fontFamily:"sans-serif" }}>{doneCount} of {CHECKLIST_ITEMS.length} complete</div>
+            <div style={{ fontSize:14, fontWeight:900, color: allDone?"#00e5a0":"#ffb347" }}>{pct}%</div>
+          </div>
+          <div style={{ height:6, background:"#1a1f2e", borderRadius:3, overflow:"hidden" }}>
+            <div style={{ height:"100%", width:pct+"%", background: allDone?"#00e5a0":"linear-gradient(90deg,#ffb347,#ff5757)", borderRadius:3, transition:"width 0.3s" }} />
+          </div>
+          {allDone && <div style={{ fontSize:13, color:"#00e5a0", fontFamily:"sans-serif", marginTop:10, textAlign:"center", fontWeight:700 }}>You are ready for Sunday! 🎉</div>}
+        </div>
+
+        <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:24 }}>
+          {CHECKLIST_ITEMS.map(function(item) {
+            var isDone = !!checked[item.id];
+            return (
+              <button key={item.id} onClick={function() { toggle(item.id); }}
+                style={{ display:"flex", alignItems:"center", gap:14, background: isDone?"rgba(0,229,160,0.06)":"#0d1017", border:"1px solid "+(isDone?"rgba(0,229,160,0.25)":"#1a1f2e"), borderRadius:12, padding:"14px 18px", cursor:"pointer", textAlign:"left", transition:"all 0.15s" }}>
+                <div style={{ width:22, height:22, borderRadius:"50%", border:"2px solid "+(isDone?"#00e5a0":"#2a3040"), background: isDone?"#00e5a0":"transparent", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, fontSize:12, color:"#07090f", fontWeight:900, transition:"all 0.15s" }}>
+                  {isDone ? "v" : ""}
+                </div>
+                <span style={{ fontSize:14, color: isDone?"#6b7280":"#e8eaf0", fontFamily:"sans-serif", textDecoration: isDone?"line-through":"none", transition:"all 0.15s" }}>{item.text}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        <button onClick={resetAll} style={{ background:"transparent", border:"1px solid #1a1f2e", borderRadius:10, padding:"10px 20px", color:"#4a5568", fontSize:12, fontFamily:"sans-serif", cursor:"pointer" }}>
+          Reset for next service
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── SESSION HISTORY PAGE ──────────────────────────────────────────────────────
+function HistoryPage({ navigate }) {
+  var histState = useState(loadHistory);
+  var history = histState[0]; var setHistory = histState[1];
+
+  var handleClear = function() {
+    clearHistory();
+    setHistory([]);
+  };
+
+  if (history.length === 0) {
+    return (
+      <div style={{ background:"#07090f", minHeight:"100vh", paddingTop:80, fontFamily:"Georgia,serif", color:"#e8eaf0" }}>
+        <div style={{ maxWidth:680, margin:"0 auto", padding:"40px 20px", textAlign:"center" }}>
+          <div style={{ fontSize:48, marginBottom:20 }}>📊</div>
+          <div style={{ fontSize:20, fontWeight:900, color:"#fff", marginBottom:10, fontFamily:"sans-serif" }}>No analyses yet</div>
+          <div style={{ fontSize:14, color:"#6b7280", fontFamily:"sans-serif", marginBottom:28 }}>Analyze your first recording to start tracking your improvement.</div>
+          <button onClick={function() { navigate("analyze"); }} style={{ background:"#00e5a0", color:"#07090f", border:"none", borderRadius:10, padding:"13px 28px", fontSize:14, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer" }}>Analyze Now</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ background:"#07090f", minHeight:"100vh", paddingTop:80, fontFamily:"Georgia,serif", color:"#e8eaf0" }}>
+      <div style={{ maxWidth:780, margin:"0 auto", padding:"40px 20px" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:28, flexWrap:"wrap", gap:12 }}>
+          <div>
+            <div style={{ fontSize:10, letterSpacing:4, color:"#00e5a0", fontFamily:"monospace", fontWeight:700, marginBottom:10 }}>SESSION HISTORY</div>
+            <h1 style={{ fontSize:"clamp(20px,4vw,32px)", fontWeight:900, margin:0, letterSpacing:-1.5, color:"#fff" }}>Your Mix Progress</h1>
+          </div>
+          <button onClick={handleClear} style={{ background:"transparent", border:"1px solid #1a1f2e", borderRadius:8, padding:"8px 16px", color:"#4a5568", fontSize:12, fontFamily:"sans-serif", cursor:"pointer" }}>Clear History</button>
+        </div>
+
+        <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+          {history.map(function(entry, i) {
+            var scoreInfo = getScoreLabel(entry.score || 0);
+            var date = entry.date ? new Date(entry.date).toLocaleDateString() : "Unknown date";
+            return (
+              <div key={i} style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:14, padding:"18px 20px" }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", flexWrap:"wrap", gap:8, marginBottom:12 }}>
+                  <div>
+                    <div style={{ fontSize:13, fontWeight:700, color:"#e8eaf0", fontFamily:"sans-serif", marginBottom:4 }}>{entry.fileName || "Recording"}</div>
+                    <div style={{ fontSize:11, color:"#4a5568", fontFamily:"sans-serif" }}>{date} {entry.mixer ? "• " + entry.mixer : ""} {entry.mode ? "• " + entry.mode : ""}</div>
+                  </div>
+                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                    <div style={{ fontSize:11, color:scoreInfo.color, fontFamily:"monospace", fontWeight:700 }}>{scoreInfo.emoji} {scoreInfo.label}</div>
+                    <div style={{ fontSize:26, fontWeight:900, color:scoreInfo.color, letterSpacing:-1 }}>{entry.score}</div>
+                  </div>
+                </div>
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(100px,1fr))", gap:8 }}>
+                  {[
+                    { label:"LUFS", val:entry.lufs },
+                    { label:"PEAK", val:entry.peakDb + " dBTP" },
+                    { label:"DYNAMIC", val:entry.dynRange + " LU" },
+                    { label:"STEREO", val:entry.stereoWidth + "%" },
+                  ].map(function(m, j) {
+                    return (
+                      <div key={j} style={{ background:"#060810", borderRadius:8, padding:"8px 10px" }}>
+                        <div style={{ fontSize:8, letterSpacing:2, color:"#4a5568", fontFamily:"monospace", marginBottom:3 }}>{m.label}</div>
+                        <div style={{ fontSize:13, fontWeight:700, color:"#e8eaf0", fontFamily:"sans-serif" }}>{m.val}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── AI CHAT ASSISTANT ─────────────────────────────────────────────────────────
+function AIChatPage({ isPro, onUnlockClick }) {
+  var msgsState = useState([{
+    role:"assistant",
+    text:"Hi! I am your MixCheck AI audio assistant. Ask me anything about your livestream mix, EQ, compression, effects, or mixer settings. For best results, tell me what mixer you use and what problem you are hearing."
+  }]);
+  var msgs = msgsState[0]; var setMsgs = msgsState[1];
+  var inputState = useState(""); var input = inputState[0]; var setInput = inputState[1];
+  var loadingState = useState(false); var loading = loadingState[0]; var setLoading = loadingState[1];
+  var bottomRef = useRef();
+
+  useEffect(function() {
+    if (bottomRef.current) bottomRef.current.scrollIntoView({ behavior:"smooth" });
+  }, [msgs]);
+
+  var send = async function() {
+    if (!input.trim() || loading) return;
+    var userMsg = input.trim();
+    setInput("");
+    var newMsgs = msgs.concat([{ role:"user", text:userMsg }]);
+    setMsgs(newMsgs);
+    setLoading(true);
+
+    try {
+      var history = newMsgs.map(function(m) {
+        return { role: m.role === "assistant" ? "assistant" : "user", content: m.text };
+      });
+
+      var response = await fetch("https://api.anthropic.com/v1/messages", {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({
+          model:"claude-sonnet-4-20250514",
+          max_tokens:1000,
+          system:"You are MixCheck AI, an expert live sound engineer assistant specializing in church and studio livestream audio. You help volunteer sound engineers get better audio for their streams. Keep answers concise, practical and in plain English. No jargon unless you explain it. Focus on actionable advice. When giving EQ or compression settings always give ranges, not fixed values. Be encouraging - most users are volunteers not professionals.",
+          messages: history
+        })
+      });
+
+      var data = await response.json();
+      var reply = data.content && data.content[0] ? data.content[0].text : "Sorry, I could not get a response. Please try again.";
+      setMsgs(function(prev) { return prev.concat([{ role:"assistant", text:reply }]); });
+    } catch(err) {
+      setMsgs(function(prev) { return prev.concat([{ role:"assistant", text:"Connection error. Please check your internet and try again." }]); });
+    }
+    setLoading(false);
+  };
+
+  var suggestions = [
+    "Why does my stream sound quiet even when the room is loud?",
+    "How do I set up a separate stream mix on my QU-24?",
+    "My vocals sound muddy on stream. What should I cut?",
+    "What compression settings work for a live worship vocal?",
+    "How do I stop feedback without ruining the stream mix?",
+  ];
+
+  if (!isPro) {
+    return (
+      <div style={{ background:"#07090f", minHeight:"100vh", paddingTop:80, fontFamily:"Georgia,serif", color:"#e8eaf0" }}>
+        <div style={{ maxWidth:680, margin:"0 auto", padding:"40px 20px", textAlign:"center" }}>
+          <div style={{ fontSize:48, marginBottom:20 }}>🤖</div>
+          <div style={{ fontSize:10, letterSpacing:4, color:"#4a7cff", fontFamily:"monospace", fontWeight:700, marginBottom:14 }}>AI ASSISTANT</div>
+          <h1 style={{ fontSize:"clamp(22px,4vw,34px)", fontWeight:900, margin:"0 0 16px", letterSpacing:-1.5, color:"#fff" }}>Ask an Audio Expert</h1>
+          <p style={{ fontSize:14, color:"#6b7280", fontFamily:"sans-serif", lineHeight:1.7, marginBottom:28, maxWidth:460, margin:"0 auto 28px" }}>
+            The MixCheck AI Assistant answers your specific mix questions in real time. Ask about EQ, compression, effects, routing, problem-solving - anything audio.
+          </p>
+          <div style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:16, padding:"20px", marginBottom:28, textAlign:"left" }}>
+            <div style={{ fontSize:11, color:"#4a5568", fontFamily:"sans-serif", marginBottom:12 }}>Example questions:</div>
+            {suggestions.map(function(s, i) {
+              return <div key={i} style={{ fontSize:13, color:"#8892a4", fontFamily:"sans-serif", padding:"8px 0", borderBottom:i<suggestions.length-1?"1px solid #1a1f2e":"none" }}>"{s}"</div>;
+            })}
+          </div>
+          <button onClick={onUnlockClick} style={{ background:"linear-gradient(135deg,#4a7cff,#7c3aed)", color:"#fff", border:"none", borderRadius:10, padding:"14px 32px", fontSize:15, fontFamily:"sans-serif", fontWeight:800, cursor:"pointer" }}>
+            Unlock Pro to Chat - $9.99 CAD/mo
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ background:"#07090f", minHeight:"100vh", paddingTop:80, fontFamily:"Georgia,serif", color:"#e8eaf0", display:"flex", flexDirection:"column" }}>
+      <div style={{ maxWidth:780, margin:"0 auto", width:"100%", padding:"20px 20px 0", flex:1, display:"flex", flexDirection:"column" }}>
+        <div style={{ marginBottom:16 }}>
+          <div style={{ fontSize:10, letterSpacing:4, color:"#4a7cff", fontFamily:"monospace", fontWeight:700, marginBottom:6 }}>AI ASSISTANT</div>
+          <div style={{ fontSize:20, fontWeight:900, color:"#fff", letterSpacing:-0.5, fontFamily:"sans-serif" }}>Ask me anything about your mix 🤖</div>
+        </div>
+
+        <div style={{ flex:1, overflowY:"auto", paddingBottom:16, minHeight:300, maxHeight:"60vh" }}>
+          {msgs.map(function(m, i) {
+            var isAI = m.role === "assistant";
+            return (
+              <div key={i} style={{ display:"flex", justifyContent: isAI?"flex-start":"flex-end", marginBottom:12 }}>
+                <div style={{ maxWidth:"82%", background: isAI?"#0d1017":"rgba(0,229,160,0.1)", border:"1px solid "+(isAI?"#1a1f2e":"rgba(0,229,160,0.25)"), borderRadius: isAI?"4px 14px 14px 14px":"14px 4px 14px 14px", padding:"12px 16px" }}>
+                  {isAI && <div style={{ fontSize:10, color:"#00e5a0", fontFamily:"monospace", fontWeight:700, marginBottom:6 }}>MIXCHECK AI</div>}
+                  <div style={{ fontSize:13, color:"#e8eaf0", fontFamily:"sans-serif", lineHeight:1.7, whiteSpace:"pre-wrap" }}>{m.text}</div>
+                </div>
+              </div>
+            );
+          })}
+          {loading && (
+            <div style={{ display:"flex", justifyContent:"flex-start", marginBottom:12 }}>
+              <div style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:"4px 14px 14px 14px", padding:"12px 16px" }}>
+                <div style={{ display:"flex", gap:6, alignItems:"center" }}>
+                  {[0,1,2].map(function(j) { return <div key={j} style={{ width:6, height:6, borderRadius:"50%", background:"#00e5a0", animation:"wave 0.8s ease-in-out infinite alternate", animationDelay:(j*0.2)+"s" }} />; })}
+                </div>
+              </div>
+            </div>
+          )}
+          <div ref={bottomRef} />
+        </div>
+
+        {msgs.length <= 1 && (
+          <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:12 }}>
+            {suggestions.slice(0,3).map(function(s, i) {
+              return (
+                <button key={i} onClick={function() { setInput(s); }}
+                  style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:8, padding:"8px 12px", fontSize:11, color:"#6b7280", fontFamily:"sans-serif", cursor:"pointer", textAlign:"left" }}>
+                  {s}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        <div style={{ display:"flex", gap:10, paddingBottom:20 }}>
+          <input
+            value={input}
+            onChange={function(e) { setInput(e.target.value); }}
+            onKeyDown={function(e) { if(e.key==="Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+            placeholder="Ask about EQ, compression, routing, effects..."
+            style={{ flex:1, background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:12, padding:"13px 16px", color:"#e8eaf0", fontSize:14, fontFamily:"sans-serif", outline:"none" }}
+          />
+          <button onClick={send} disabled={!input.trim() || loading}
+            style={{ background: input.trim()&&!loading?"#00e5a0":"#1a1f2e", color: input.trim()&&!loading?"#07090f":"#2a3040", border:"none", borderRadius:12, padding:"13px 20px", fontSize:14, fontFamily:"sans-serif", fontWeight:700, cursor: input.trim()&&!loading?"pointer":"not-allowed", whiteSpace:"nowrap" }}>
+            Send
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+
 const VALID_CODE_HASHES = [
   btoa("MIXPRO2026"),
   btoa("CHURCHPRO1"),
@@ -84,7 +464,7 @@ function ProUnlockModal({ onClose, onUnlock }) {
   );
 }
 
-function Nav({ navigate, page, isPro, onUnlockClick }) {
+function Nav({ navigate, page, isPro, onUnlockClick, appMode, setAppMode }) {
   var scrolledState = useState(false);
   var scrolled = scrolledState[0]; var setScrolled = scrolledState[1];
   useEffect(function() {
@@ -99,13 +479,19 @@ function Nav({ navigate, page, isPro, onUnlockClick }) {
           <div style={{ width:30, height:30, borderRadius:8, background:"linear-gradient(135deg,#00e5a0,#00b880)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:15 }}>🎛</div>
           <span style={{ fontFamily:"monospace", fontWeight:700, fontSize:15, color:"#fff" }}>MixCheck <span style={{ color:"#00e5a0" }}>AI</span></span>
         </button>
-        <div style={{ display:"flex", gap:6, alignItems:"center" }}>
-          {[["home","Home"],["pricing","Pricing"],["analyze","Analyze"]].map(function(item) {
+        <div style={{ display:"flex", gap:4, alignItems:"center", overflowX:"auto" }}>
+          {[["home","Home"],["analyze","Analyze"],["checklist","Checklist"],["history","History"],["chat","AI"],["pricing","Pricing"]].map(function(item) {
             var p = item[0]; var label = item[1];
             return (
-              <button key={p} onClick={function() { navigate(p); }} style={{ background: page===p ? "rgba(0,229,160,0.1)" : "none", border: page===p ? "1px solid rgba(0,229,160,0.25)" : "1px solid transparent", borderRadius:8, padding:"6px 14px", cursor:"pointer", color: page===p ? "#00e5a0" : "#6b7280", fontSize:13, fontFamily:"sans-serif", fontWeight: page===p ? 600 : 400 }}>{label}</button>
+              <button key={p} onClick={function() { navigate(p); }} style={{ background: page===p ? "rgba(0,229,160,0.1)" : "none", border: page===p ? "1px solid rgba(0,229,160,0.25)" : "1px solid transparent", borderRadius:8, padding:"6px 10px", cursor:"pointer", color: page===p ? "#00e5a0" : "#6b7280", fontSize:12, fontFamily:"sans-serif", fontWeight: page===p ? 600 : 400, whiteSpace:"nowrap", flexShrink:0 }}>{label}</button>
             );
           })}
+          {setAppMode && (
+            <button onClick={function() { setAppMode(appMode === "church" ? "studio" : "church"); }}
+              style={{ background:"rgba(255,179,71,0.1)", border:"1px solid rgba(255,179,71,0.25)", borderRadius:8, padding:"6px 10px", cursor:"pointer", color:"#ffb347", fontSize:11, fontFamily:"monospace", fontWeight:700, whiteSpace:"nowrap", flexShrink:0, marginLeft:4 }}>
+              {appMode === "church" ? "CHURCH" : "STUDIO"}
+            </button>
+          )}
           {isPro ? (
             <div style={{ display:"flex", alignItems:"center", gap:6, background:"rgba(0,229,160,0.1)", border:"1px solid rgba(0,229,160,0.3)", borderRadius:8, padding:"6px 14px" }}>
               <div style={{ width:6, height:6, borderRadius:"50%", background:"#00e5a0" }} />
@@ -725,51 +1111,113 @@ function generateCheatSheetPDF(instrument, mixer, data) {
   setTimeout(function() { win.print(); }, 500);
 }
 
+function ProGate({ onUnlockClick, what }) {
+  return (
+    <div style={{ position:"relative", marginBottom:16 }}>
+      <div style={{ filter:"blur(4px)", pointerEvents:"none", userSelect:"none", opacity:0.4, background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:14, padding:"18px" }}>
+        <div style={{ fontSize:10, letterSpacing:3, color:"#4a7cff", fontFamily:"monospace", fontWeight:700, marginBottom:10 }}>{what}</div>
+        <div style={{ height:12, background:"#1a1f2e", borderRadius:4, marginBottom:8, width:"80%" }} />
+        <div style={{ height:12, background:"#1a1f2e", borderRadius:4, marginBottom:8, width:"60%" }} />
+        <div style={{ height:12, background:"#1a1f2e", borderRadius:4, width:"70%" }} />
+      </div>
+      <div style={{ position:"absolute", inset:0, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", background:"rgba(7,9,15,0.7)", backdropFilter:"blur(2px)", borderRadius:14, border:"1px solid rgba(74,124,255,0.3)" }}>
+        <div style={{ fontSize:20, marginBottom:8 }}>🔒</div>
+        <div style={{ fontSize:13, fontWeight:700, color:"#fff", fontFamily:"sans-serif", marginBottom:4 }}>{what}</div>
+        <div style={{ fontSize:11, color:"#6b7280", fontFamily:"sans-serif", marginBottom:14, textAlign:"center", maxWidth:240 }}>Upgrade to Pro to unlock this section</div>
+        <button onClick={onUnlockClick} style={{ background:"linear-gradient(135deg,#4a7cff,#7c3aed)", color:"#fff", border:"none", borderRadius:8, padding:"9px 20px", fontSize:13, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer" }}>
+          Unlock Pro - $9.99 CAD/mo
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function CheatSheetPage({ mixer, instrument, isPro, onUnlockClick, onReset }) {
   var data = getCheatSheet(instrument, mixer);
   var isDigital = getMixerType(mixer) !== "analog";
-  var prioColors = { high:"#ff5757", med:"#ffb347", ok:"#00e5a0", tip:"#4a7cff" };
+  var freePeqLimit = 2; // Free users see first 2 PEQ bands only
 
   return (
     <div style={{ animation:"fadein 0.4s ease" }}>
+      {/* Header badges */}
       <div style={{ display:"flex", gap:10, flexWrap:"wrap", marginBottom:20 }}>
         <div style={{ background:"rgba(0,229,160,0.08)", border:"1px solid rgba(0,229,160,0.2)", borderRadius:8, padding:"6px 14px", fontSize:12, color:"#00e5a0", fontFamily:"sans-serif", fontWeight:600 }}>{mixer ? mixer.name : "General"}</div>
         <div style={{ background:"rgba(74,124,255,0.1)", border:"1px solid rgba(74,124,255,0.2)", borderRadius:8, padding:"6px 14px", fontSize:12, color:"#4a7cff", fontFamily:"sans-serif", fontWeight:600 }}>{instrument.icon} {instrument.name} Cheat Sheet</div>
-        {isPro && (
+        {isPro ? (
           <button onClick={function() { generateCheatSheetPDF(instrument, mixer, data); }}
             style={{ background:"linear-gradient(135deg,#4a7cff,#7c3aed)", color:"#fff", border:"none", borderRadius:8, padding:"6px 14px", fontSize:12, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer" }}>
             Download PDF
           </button>
+        ) : (
+          <div style={{ display:"flex", alignItems:"center", gap:6, background:"rgba(255,179,71,0.1)", border:"1px solid rgba(255,179,71,0.3)", borderRadius:8, padding:"6px 14px" }}>
+            <span style={{ fontSize:11, color:"#ffb347", fontFamily:"sans-serif" }}>Free preview - 2 of {data.peq ? data.peq.length : 4} EQ bands shown</span>
+          </div>
         )}
       </div>
 
+      {/* HPF - always free */}
       <div style={{ background:"rgba(0,229,160,0.06)", border:"1px solid rgba(0,229,160,0.25)", borderRadius:12, padding:"14px 18px", marginBottom:16 }}>
-        <div style={{ fontSize:10, letterSpacing:3, color:"#00e5a0", fontFamily:"monospace", fontWeight:700, marginBottom:8 }}>HIGH PASS FILTER</div>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+          <div style={{ fontSize:10, letterSpacing:3, color:"#00e5a0", fontFamily:"monospace", fontWeight:700 }}>HIGH PASS FILTER</div>
+          <span style={{ fontSize:9, color:"#00e5a0", background:"rgba(0,229,160,0.1)", borderRadius:4, padding:"2px 8px", fontFamily:"monospace" }}>FREE</span>
+        </div>
         <div style={{ fontSize:13, color:"#e8eaf0", fontFamily:"sans-serif", lineHeight:1.6 }}>{data.hpf}</div>
       </div>
 
+      {/* PEQ - free gets first 2, rest locked */}
       {data.peq && data.peq.length > 0 && (
         <div style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:14, padding:"18px", marginBottom:16 }}>
-          <div style={{ fontSize:10, letterSpacing:3, color:"#4a7cff", fontFamily:"monospace", fontWeight:700, marginBottom:14 }}>
-            PARAMETRIC EQ (PEQ) - CHANNEL STRIP {!isDigital && <span style={{ color:"#ffb347", fontSize:9, marginLeft:8 }}>ANALOG: use available EQ bands</span>}
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+            <div style={{ fontSize:10, letterSpacing:3, color:"#4a7cff", fontFamily:"monospace", fontWeight:700 }}>
+              PARAMETRIC EQ (PEQ) {!isDigital && <span style={{ color:"#ffb347", fontSize:9, marginLeft:8 }}>ANALOG: use available bands</span>}
+            </div>
+            {!isPro && <span style={{ fontSize:9, color:"#ffb347", background:"rgba(255,179,71,0.1)", borderRadius:4, padding:"2px 8px", fontFamily:"monospace" }}>{freePeqLimit} of {data.peq.length} bands</span>}
           </div>
           {data.peq.map(function(p, i) {
+            var isLocked = !isPro && i >= freePeqLimit;
             return (
-              <div key={i} style={{ paddingBottom:i<data.peq.length-1?14:0, marginBottom:i<data.peq.length-1?14:0, borderBottom:i<data.peq.length-1?"1px solid #1a1f2e":"none" }}>
-                <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:6 }}>
-                  <span style={{ background:"rgba(74,124,255,0.15)", border:"1px solid rgba(74,124,255,0.3)", borderRadius:6, padding:"3px 10px", fontSize:11, color:"#4a7cff", fontFamily:"monospace", fontWeight:700 }}>{p.band}</span>
-                  <span style={{ background:"rgba(0,229,160,0.1)", border:"1px solid rgba(0,229,160,0.2)", borderRadius:6, padding:"3px 10px", fontSize:11, color:"#00e5a0", fontFamily:"monospace" }}>{p.freq}</span>
-                  <span style={{ background: p.action.includes("Boost") ? "rgba(0,229,160,0.15)" : "rgba(255,87,87,0.15)", border:"1px solid " + (p.action.includes("Boost") ? "rgba(0,229,160,0.3)" : "rgba(255,87,87,0.3)"), borderRadius:6, padding:"3px 10px", fontSize:11, color: p.action.includes("Boost") ? "#00e5a0" : "#ff5757", fontFamily:"monospace", fontWeight:700 }}>{p.action}</span>
-                  <span style={{ fontSize:11, color:"#4a5568", fontFamily:"sans-serif", padding:"3px 0" }}>Q: {p.q}</span>
-                </div>
-                <div style={{ fontSize:12, color:"#6b7280", fontFamily:"sans-serif", lineHeight:1.5 }}>{p.reason}</div>
+              <div key={i} style={{ paddingBottom:i<data.peq.length-1?14:0, marginBottom:i<data.peq.length-1?14:0, borderBottom:i<data.peq.length-1?"1px solid #1a1f2e":"none", position:"relative" }}>
+                {isLocked ? (
+                  <div style={{ filter:"blur(5px)", pointerEvents:"none", userSelect:"none", opacity:0.35 }}>
+                    <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:6 }}>
+                      <span style={{ background:"rgba(74,124,255,0.15)", borderRadius:6, padding:"3px 10px", fontSize:11, color:"#4a7cff", fontFamily:"monospace", fontWeight:700 }}>{p.band}</span>
+                      <span style={{ background:"rgba(0,229,160,0.1)", borderRadius:6, padding:"3px 10px", fontSize:11, color:"#00e5a0", fontFamily:"monospace" }}>{p.freq}</span>
+                      <span style={{ background:"rgba(255,87,87,0.15)", borderRadius:6, padding:"3px 10px", fontSize:11, color:"#ff5757", fontFamily:"monospace", fontWeight:700 }}>{p.action}</span>
+                    </div>
+                    <div style={{ fontSize:12, color:"#6b7280", fontFamily:"sans-serif" }}>{p.reason}</div>
+                  </div>
+                ) : (
+                  <div>
+                    <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:6 }}>
+                      <span style={{ background:"rgba(74,124,255,0.15)", border:"1px solid rgba(74,124,255,0.3)", borderRadius:6, padding:"3px 10px", fontSize:11, color:"#4a7cff", fontFamily:"monospace", fontWeight:700 }}>{p.band}</span>
+                      <span style={{ background:"rgba(0,229,160,0.1)", border:"1px solid rgba(0,229,160,0.2)", borderRadius:6, padding:"3px 10px", fontSize:11, color:"#00e5a0", fontFamily:"monospace" }}>{p.freq}</span>
+                      <span style={{ background: p.action.includes("Boost")?"rgba(0,229,160,0.15)":"rgba(255,87,87,0.15)", border:"1px solid "+(p.action.includes("Boost")?"rgba(0,229,160,0.3)":"rgba(255,87,87,0.3)"), borderRadius:6, padding:"3px 10px", fontSize:11, color: p.action.includes("Boost")?"#00e5a0":"#ff5757", fontFamily:"monospace", fontWeight:700 }}>{p.action}</span>
+                      <span style={{ fontSize:11, color:"#4a5568", fontFamily:"sans-serif", padding:"3px 0" }}>Q: {p.q}</span>
+                    </div>
+                    <div style={{ fontSize:12, color:"#6b7280", fontFamily:"sans-serif", lineHeight:1.5 }}>{p.reason}</div>
+                  </div>
+                )}
               </div>
             );
           })}
+
+          {/* Unlock CTA inline after last visible free band */}
+          {!isPro && (
+            <div style={{ marginTop:16, background:"rgba(74,124,255,0.06)", border:"1px solid rgba(74,124,255,0.2)", borderRadius:10, padding:"14px 16px", display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:10 }}>
+              <div>
+                <div style={{ fontSize:12, fontWeight:700, color:"#4a7cff", fontFamily:"sans-serif", marginBottom:3 }}>🔒 {data.peq.length - freePeqLimit} more EQ bands locked</div>
+                <div style={{ fontSize:11, color:"#4a5568", fontFamily:"sans-serif" }}>Plus full compression, effects chain and stream tips</div>
+              </div>
+              <button onClick={onUnlockClick} style={{ background:"linear-gradient(135deg,#4a7cff,#7c3aed)", color:"#fff", border:"none", borderRadius:8, padding:"9px 18px", fontSize:12, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}>
+                Unlock Pro
+              </button>
+            </div>
+          )}
         </div>
       )}
 
-      {data.comp && (
+      {/* Compression - Pro only */}
+      {isPro && data.comp && (
         <div style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:14, padding:"18px", marginBottom:16 }}>
           <div style={{ fontSize:10, letterSpacing:3, color:"#ffb347", fontFamily:"monospace", fontWeight:700, marginBottom:14 }}>COMPRESSION SETTINGS</div>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:10, marginBottom:12 }}>
@@ -794,15 +1242,19 @@ function CheatSheetPage({ mixer, instrument, isPro, onUnlockClick, onReset }) {
           <div style={{ fontSize:12, color:"#6b7280", fontFamily:"sans-serif", lineHeight:1.6, marginTop:10, fontStyle:"italic" }}>{data.comp.notes}</div>
         </div>
       )}
+      {!isPro && data.comp && <ProGate onUnlockClick={onUnlockClick} what="COMPRESSION SETTINGS" />}
 
-      {data.geq_stream && (
+      {/* GEQ Stream Tips - Pro only */}
+      {isPro && data.geq_stream && (
         <div style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:14, padding:"18px", marginBottom:16 }}>
           <div style={{ fontSize:10, letterSpacing:3, color:"#00e5a0", fontFamily:"monospace", fontWeight:700, marginBottom:10 }}>STREAM MIX / GEQ TIPS</div>
           <div style={{ fontSize:13, color:"#c8d0e0", fontFamily:"sans-serif", lineHeight:1.6 }}>{data.geq_stream}</div>
         </div>
       )}
+      {!isPro && data.geq_stream && <ProGate onUnlockClick={onUnlockClick} what="STREAM MIX / GEQ TIPS" />}
 
-      {data.effects && data.effects.length > 0 && (
+      {/* Effects Chain - Pro only */}
+      {isPro && data.effects && data.effects.length > 0 && (
         <div style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:14, padding:"18px", marginBottom:16 }}>
           <div style={{ fontSize:10, letterSpacing:3, color:"#a78bfa", fontFamily:"monospace", fontWeight:700, marginBottom:14 }}>RECOMMENDED EFFECTS CHAIN</div>
           {data.effects.map(function(fx, i) {
@@ -819,8 +1271,10 @@ function CheatSheetPage({ mixer, instrument, isPro, onUnlockClick, onReset }) {
           })}
         </div>
       )}
+      {!isPro && data.effects && data.effects.length > 0 && <ProGate onUnlockClick={onUnlockClick} what="RECOMMENDED EFFECTS CHAIN" />}
 
-      {data.stream_tips && data.stream_tips.length > 0 && (
+      {/* Stream Tips - Pro only */}
+      {isPro && data.stream_tips && data.stream_tips.length > 0 && (
         <div style={{ background:"rgba(255,179,71,0.06)", border:"1px solid rgba(255,179,71,0.2)", borderRadius:14, padding:"18px", marginBottom:16 }}>
           <div style={{ fontSize:10, letterSpacing:3, color:"#ffb347", fontFamily:"monospace", fontWeight:700, marginBottom:12 }}>STREAM TIPS FOR {instrument.name.toUpperCase()}</div>
           {data.stream_tips.map(function(t, i) {
@@ -833,16 +1287,20 @@ function CheatSheetPage({ mixer, instrument, isPro, onUnlockClick, onReset }) {
           })}
         </div>
       )}
+      {!isPro && data.stream_tips && data.stream_tips.length > 0 && <ProGate onUnlockClick={onUnlockClick} what="STREAM TIPS" />}
 
+      {/* Big Pro upsell at bottom for free users */}
       {!isPro && (
-        <div style={{ background:"linear-gradient(135deg,rgba(74,124,255,0.07),rgba(74,124,255,0.02))", border:"1px solid rgba(74,124,255,0.25)", borderRadius:14, padding:"18px", marginBottom:16 }}>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:12 }}>
-            <div>
-              <div style={{ fontSize:13, fontWeight:700, color:"#4a7cff", fontFamily:"sans-serif", marginBottom:4 }}>Download this as a PDF cheat sheet</div>
-              <div style={{ fontSize:12, color:"#6b7280", fontFamily:"sans-serif" }}>Pro users get printable PDF cheat sheets for all 11 instruments. Take it to your console.</div>
-            </div>
-            <button onClick={onUnlockClick} style={{ background:"linear-gradient(135deg,#4a7cff,#7c3aed)", color:"#fff", border:"none", borderRadius:8, padding:"10px 20px", fontSize:13, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}>Unlock Pro</button>
+        <div style={{ background:"linear-gradient(135deg,rgba(74,124,255,0.1),rgba(124,58,237,0.08))", border:"1.5px solid rgba(74,124,255,0.35)", borderRadius:16, padding:"24px", marginBottom:16, textAlign:"center" }}>
+          <div style={{ fontSize:28, marginBottom:12 }}>🔒</div>
+          <div style={{ fontSize:16, fontWeight:900, color:"#fff", fontFamily:"sans-serif", marginBottom:8, letterSpacing:-0.5 }}>Unlock the Full Cheat Sheet</div>
+          <div style={{ fontSize:13, color:"#6b7280", fontFamily:"sans-serif", lineHeight:1.6, marginBottom:20, maxWidth:380, margin:"0 auto 20px" }}>
+            You are seeing 2 of {data.peq ? data.peq.length : 4} EQ bands. Pro unlocks full PEQ, compression, effects chain, stream tips, and PDF export for all 11 instruments.
           </div>
+          <button onClick={onUnlockClick} style={{ background:"linear-gradient(135deg,#4a7cff,#7c3aed)", color:"#fff", border:"none", borderRadius:10, padding:"13px 32px", fontSize:14, fontFamily:"sans-serif", fontWeight:800, cursor:"pointer" }}>
+            Unlock Pro - $9.99 CAD/mo
+          </button>
+          <div style={{ fontSize:11, color:"#2a3040", fontFamily:"sans-serif", marginTop:10 }}>Cancel anytime. Instant access after payment.</div>
         </div>
       )}
 
@@ -853,7 +1311,7 @@ function CheatSheetPage({ mixer, instrument, isPro, onUnlockClick, onReset }) {
   );
 }
 
-function AnalyzePage({ navigate, isPro, onUnlockClick }) {
+function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
   var stepState = useState(1); var step = stepState[0]; var setStep = stepState[1];
   var mixerState = useState(null); var mixer = mixerState[0]; var setMixer = mixerState[1];
   var customState = useState(""); var customMixer = customState[0]; var setCustomMixer = customState[1];
@@ -873,6 +1331,14 @@ function AnalyzePage({ navigate, isPro, onUnlockClick }) {
 
   var analyze = useCallback(async function(f) {
     if (!f) return;
+    // Check usage limit for free users
+    if (!isPro) {
+      var usageNow = getUsageCount();
+      if (usageNow >= FREE_LIMIT) {
+        setResults({ error:"You have used your " + FREE_LIMIT + " free analyses this month. Upgrade to Pro for unlimited analyses." });
+        setStep(4); return;
+      }
+    }
     var ext = f.name.split(".").pop().toLowerCase();
     var validExts = ["mp3","wav","aac","m4a","flac","ogg","mp4","mov","webm","wma"];
     if (validExts.indexOf(ext) === -1) {
@@ -880,7 +1346,7 @@ function AnalyzePage({ navigate, isPro, onUnlockClick }) {
       setStep(4); return;
     }
     if (f.size > 500 * 1024 * 1024) {
-      setResults({ error:"File too large (max 500MB). For a 2-hour service, export as MP3 128kbps - it will be under 115MB." });
+      setResults({ error:"File too large (max 500MB). For a 2-hour service, export as MP3 128kbps." });
       setStep(4); return;
     }
     setFile(f); setAnalyzing(true); setResults(null);
@@ -890,24 +1356,30 @@ function AnalyzePage({ navigate, isPro, onUnlockClick }) {
       await new Promise(function(r) { setTimeout(r, 80); });
       setAnalyzeStatus(mb > 50 ? "Decoding and sampling key sections..." : "Measuring loudness, peak, dynamics...");
       var m = await measureAudio(f);
-      setAnalyzeStatus("Analyzing frequency balance...");
-      await new Promise(function(r) { setTimeout(r, 80); });
+      setAnalyzeStatus("Calculating mix score...");
+      await new Promise(function(r) { setTimeout(r, 60); });
       setAnalyzeStatus("Generating recommendations...");
-      var recs = generateRecs(
-        m.lufs !== undefined ? m.lufs : -20,
-        m.peakDb !== undefined ? m.peakDb : -6,
-        m.dynRange !== undefined ? m.dynRange : 12,
-        m.stereoWidth !== undefined ? m.stereoWidth : 50,
-        m.freq || null
-      );
-      setResults(Object.assign({}, m, { recs: recs, mixer: selectedMixer }));
+      var lufsVal = m.lufs !== undefined ? m.lufs : -20;
+      var peakVal = m.peakDb !== undefined ? m.peakDb : -6;
+      var dynVal  = m.dynRange !== undefined ? m.dynRange : 12;
+      var swVal   = m.stereoWidth !== undefined ? m.stereoWidth : 50;
+      var recs    = generateRecs(lufsVal, peakVal, dynVal, swVal, m.freq || null);
+      var score   = calcMixScore(lufsVal, peakVal, dynVal, swVal);
+      var finalR  = Object.assign({}, m, { recs:recs, mixer:selectedMixer, score:score, lufs:lufsVal, peakDb:peakVal, dynRange:dynVal, stereoWidth:swVal });
+      saveToHistory({
+        fileName: f.name, date: new Date().toISOString(),
+        score: score, lufs: lufsVal, peakDb: peakVal, dynRange: dynVal, stereoWidth: swVal,
+        mixer: selectedMixer ? selectedMixer.name : "", mode: appMode || "church",
+      });
+      if (!isPro) incrementUsage();
+      setResults(finalR);
       setStep(4);
     } catch(err) {
       setResults({ error: (err && err.message) ? err.message : "Could not analyze. Try an MP3 or WAV file." });
       setStep(4);
     }
     setAnalyzing(false); setAnalyzeStatus("");
-  }, [selectedMixer]);
+  }, [selectedMixer, isPro, appMode]);
 
   var onDrop = useCallback(function(e) {
     e.preventDefault(); setDragOver(false);
@@ -1031,16 +1503,29 @@ function AnalyzePage({ navigate, isPro, onUnlockClick }) {
 
         {step === 3 && mode === "full" && !analyzing && (
           <div style={{ animation:"fadein 0.3s ease" }}>
-            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", background:"rgba(0,229,160,0.06)", border:"1px solid rgba(0,229,160,0.2)", borderRadius:10, padding:"10px 16px", marginBottom:20 }}>
-              <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-                <span style={{ fontSize:16 }}>🎛</span>
-                <div>
-                  <div style={{ fontSize:12, fontWeight:700, color:"#00e5a0", fontFamily:"sans-serif" }}>{selectedMixer.name}</div>
-                  <div style={{ fontSize:10, color:"#4a5568", fontFamily:"sans-serif" }}>Stream: {selectedMixer.streams}</div>
+            <div style={{ display:"flex", gap:10, flexWrap:"wrap", marginBottom:16 }}>
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", background:"rgba(0,229,160,0.06)", border:"1px solid rgba(0,229,160,0.2)", borderRadius:10, padding:"10px 16px", flex:1 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                  <span style={{ fontSize:16 }}>🎛</span>
+                  <div>
+                    <div style={{ fontSize:12, fontWeight:700, color:"#00e5a0", fontFamily:"sans-serif" }}>{selectedMixer.name}</div>
+                    <div style={{ fontSize:10, color:"#4a5568", fontFamily:"sans-serif" }}>Stream: {selectedMixer.streams}</div>
+                  </div>
                 </div>
+                <button onClick={function() { setStep(1); }} style={{ background:"none", border:"none", color:"#4a5568", fontSize:12, fontFamily:"sans-serif", cursor:"pointer" }}>Change</button>
               </div>
-              <button onClick={function() { setStep(1); }} style={{ background:"none", border:"none", color:"#4a5568", fontSize:12, fontFamily:"sans-serif", cursor:"pointer" }}>Change</button>
+              <div style={{ background: appMode==="studio"?"rgba(255,179,71,0.1)":"rgba(74,124,255,0.08)", border:"1px solid "+(appMode==="studio"?"rgba(255,179,71,0.3)":"rgba(74,124,255,0.2)"), borderRadius:10, padding:"10px 16px", display:"flex", alignItems:"center" }}>
+                <div style={{ fontSize:11, fontWeight:700, color: appMode==="studio"?"#ffb347":"#4a7cff", fontFamily:"monospace" }}>{appMode === "studio" ? "STUDIO MODE" : "CHURCH MODE"}</div>
+              </div>
             </div>
+            {!isPro && (
+              <div style={{ background:"rgba(255,87,87,0.06)", border:"1px solid rgba(255,87,87,0.2)", borderRadius:10, padding:"10px 16px", marginBottom:12, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                <div style={{ fontSize:12, color:"#ff5757", fontFamily:"sans-serif" }}>
+                  Free: {Math.max(0, FREE_LIMIT - getUsageCount())} of {FREE_LIMIT} analyses remaining this month
+                </div>
+                <button onClick={onUnlockClick} style={{ background:"none", border:"none", color:"#00e5a0", fontSize:11, fontFamily:"sans-serif", cursor:"pointer", fontWeight:700 }}>Upgrade</button>
+              </div>
+            )}
             <div style={{ background:"rgba(74,124,255,0.06)", border:"1px solid rgba(74,124,255,0.2)", borderRadius:10, padding:"10px 16px", marginBottom:16, fontSize:12, color:"#8892a4", fontFamily:"sans-serif" }}>
               Supports files up to 500MB. For 2-hour recordings, MP3 at 128kbps is recommended (approx 115MB).
             </div>
@@ -1086,13 +1571,50 @@ function AnalyzePage({ navigate, isPro, onUnlockClick }) {
               </div>
             ) : (
               <div>
-                <div style={{ display:"flex", gap:10, flexWrap:"wrap", marginBottom:20 }}>
+                <div style={{ display:"flex", gap:10, flexWrap:"wrap", marginBottom:16 }}>
                   {results.mixer && <div style={{ background:"rgba(0,229,160,0.08)", border:"1px solid rgba(0,229,160,0.2)", borderRadius:8, padding:"6px 14px", fontSize:12, color:"#00e5a0", fontFamily:"sans-serif", fontWeight:600 }}>{results.mixer.name}</div>}
                   {file && <div style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:8, padding:"6px 14px", fontSize:12, color:"#6b7280", fontFamily:"sans-serif" }}>{file.name}</div>}
                   {results.duration > 0 && <div style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:8, padding:"6px 14px", fontSize:12, color:"#6b7280", fontFamily:"sans-serif" }}>{Math.floor(results.duration/60)}m {results.duration%60}s</div>}
-                  {results.isLongFile && <div style={{ background:"rgba(255,179,71,0.1)", border:"1px solid rgba(255,179,71,0.3)", borderRadius:8, padding:"6px 14px", fontSize:11, color:"#ffb347", fontFamily:"sans-serif" }}>Sampled {results.sliceCount} sections of long recording</div>}
-                  {isPro && <button onClick={function() { generatePDF(results, file ? file.name : "recording"); }} style={{ background:"linear-gradient(135deg,#4a7cff,#7c3aed)", color:"#fff", border:"none", borderRadius:8, padding:"6px 14px", fontSize:12, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer" }}>Download PDF Report</button>}
+                  {results.isLongFile && <div style={{ background:"rgba(255,179,71,0.1)", border:"1px solid rgba(255,179,71,0.3)", borderRadius:8, padding:"6px 14px", fontSize:11, color:"#ffb347", fontFamily:"sans-serif" }}>Sampled {results.sliceCount} sections</div>}
                 </div>
+
+                {/* MIX SCORE */}
+                {results.score !== undefined && (function() {
+                  var si = getScoreLabel(results.score);
+                  return (
+                    <div style={{ background:"linear-gradient(135deg,rgba(0,229,160,0.07),rgba(0,229,160,0.02))", border:"1px solid rgba(0,229,160,0.2)", borderRadius:16, padding:"20px 24px", marginBottom:20, display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:16 }}>
+                      <div>
+                        <div style={{ fontSize:10, letterSpacing:4, color:"#00e5a0", fontFamily:"monospace", fontWeight:700, marginBottom:8 }}>MIX SCORE</div>
+                        <div style={{ display:"flex", alignItems:"baseline", gap:10 }}>
+                          <div style={{ fontSize:56, fontWeight:900, color:si.color, letterSpacing:-3, lineHeight:1 }}>{results.score}</div>
+                          <div style={{ fontSize:22, color:"#2a3040" }}>/100</div>
+                        </div>
+                        <div style={{ fontSize:14, color:si.color, fontWeight:700, fontFamily:"sans-serif", marginTop:4 }}>{si.emoji} {si.label}</div>
+                      </div>
+                      <div style={{ textAlign:"right" }}>
+                        <div style={{ fontSize:11, color:"#4a5568", fontFamily:"sans-serif", marginBottom:6 }}>Analyze again after applying the fixes below to raise your score.</div>
+                        <div style={{ fontSize:11, color:"#2a3040", fontFamily:"monospace" }}>{appMode === "studio" ? "STUDIO MODE • -14 LUFS target" : "CHURCH MODE • -16 LUFS target"}</div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* PDF + Email buttons for Pro */}
+                {isPro && (
+                  <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:20 }}>
+                    <button onClick={function() { generatePDF(results, file ? file.name : "recording"); }}
+                      style={{ background:"linear-gradient(135deg,#4a7cff,#7c3aed)", color:"#fff", border:"none", borderRadius:8, padding:"8px 16px", fontSize:12, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer" }}>
+                      Download PDF Report
+                    </button>
+                    <button onClick={function() {
+                      var subject = "MixCheck AI Report - " + (file ? file.name : "Recording");
+                      var body = "MixCheck AI Analysis\n\nMix Score: " + results.score + "/100 (" + getScoreLabel(results.score).label + ")\n\nLoudness: " + results.lufs + " LUFS\nTrue Peak: " + results.peakDb + " dBTP\nDynamic Range: " + results.dynRange + " LU\nStereo Width: " + results.stereoWidth + "%\n\nAnalyzed by MixCheck AI - mixcheckai.com";
+                      window.location.href = "mailto:?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(body);
+                    }} style={{ background:"#0d1017", border:"1px solid #1a1f2e", color:"#e8eaf0", borderRadius:8, padding:"8px 16px", fontSize:12, fontFamily:"sans-serif", fontWeight:600, cursor:"pointer" }}>
+                      Email Report
+                    </button>
+                  </div>
+                )}
                 <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:10, marginBottom:20 }}>
                   {[
                     Object.assign({ label:"LOUDNESS", val:results.lufs+" LUFS", target:"Target: -16 LUFS" }, getLufsDiagnosis(results.lufs)),
@@ -1260,11 +1782,23 @@ function PricingPage({ navigate, isPro, onUnlockClick }) {
   var monthly = 9.99;
   var price = annual ? (monthly * 0.8).toFixed(2) : monthly.toFixed(2);
   var PRO = [
+    { icon:"📊", text:"Mix Score 0-100 - track improvement every Sunday" },
     { icon:"📄", text:"Full PDF analysis report - download and print" },
     { icon:"🔁", text:"Unlimited uploads - analyze every rehearsal" },
-    { icon:"📊", text:"Detailed frequency breakdown per analysis" },
-    { icon:"💾", text:"Priority support from a real engineer" },
-    { icon:"🆕", text:"All future features included" },
+    { icon:"🎛", text:"Full cheat sheets - all 11 instruments, all sections" },
+    { icon:"📈", text:"Session history - see your progress over time" },
+    { icon:"🤖", text:"AI Chat assistant - ask anything about your mix" },
+    { icon:"📧", text:"Email your report to yourself or your team" },
+    { icon:"🎙", text:"Studio mode + Church mode included" },
+    { icon:"🆕", text:"All future features - you get them first" },
+  ];
+  var TEAM = [
+    { icon:"👥", text:"Up to 5 users under one subscription" },
+    { icon:"📊", text:"Shared Mix Score tracking across the team" },
+    { icon:"🎛", text:"Full cheat sheets for all 11 instruments" },
+    { icon:"🤖", text:"AI Chat for all team members" },
+    { icon:"📄", text:"Unlimited PDF reports" },
+    { icon:"🏛", text:"Perfect for full church AV teams" },
   ];
   var FAQ = [
     { q:"Do I need a credit card to try free?", a:"No. Just upload a file and go. No account needed for the free tier." },
@@ -1325,6 +1859,23 @@ function PricingPage({ navigate, isPro, onUnlockClick }) {
                 Already paid? Enter access code
               </button>
             </div>
+            {/* Team Plan */}
+            <div style={{ background:"linear-gradient(160deg,rgba(74,124,255,0.07),rgba(74,124,255,0.02))", border:"1.5px solid rgba(74,124,255,0.3)", borderRadius:20, padding:"30px 26px", position:"relative" }}>
+              <div style={{ fontSize:13, fontWeight:700, color:"#4a7cff", fontFamily:"sans-serif", marginBottom:8 }}>Team</div>
+              <div style={{ display:"flex", alignItems:"baseline", gap:6, marginBottom:4 }}>
+                <span style={{ fontSize:42, fontWeight:900, color:"#fff", letterSpacing:-2 }}>$29.99</span>
+                <span style={{ fontSize:13, color:"#4a5568", fontFamily:"sans-serif" }}>CAD / mo</span>
+              </div>
+              <div style={{ fontSize:12, color:"#4a5568", fontFamily:"sans-serif", marginBottom:4 }}>Up to 5 users</div>
+              <div style={{ height:1, background:"rgba(74,124,255,0.15)", margin:"18px 0" }} />
+              {TEAM.map(function(f,i) {
+                return <div key={i} style={{ display:"flex", gap:10, marginBottom:11, alignItems:"flex-start" }}><span style={{ fontSize:13 }}>{f.icon}</span><span style={{ fontSize:13, color:"#c8d0e0", fontFamily:"sans-serif", lineHeight:1.5 }}>{f.text}</span></div>;
+              })}
+              <button onClick={function() { window.open(STRIPE_TEAM_LINK,"_blank"); }}
+                style={{ width:"100%", marginTop:24, background:"linear-gradient(135deg,#4a7cff,#7c3aed)", border:"none", borderRadius:12, padding:"14px", color:"#fff", fontSize:14, fontFamily:"sans-serif", fontWeight:800, cursor:"pointer" }}>
+                Subscribe - $29.99 CAD/mo
+              </button>
+            </div>
           </div>
         )}
         <div style={{ maxWidth:580, margin:"0 auto" }}>
@@ -1382,20 +1933,27 @@ export default function App() {
   var proResult = usePro();
   var isPro = proResult.isPro; var unlockPro = proResult.unlockPro;
   var unlockState = useState(false); var showUnlock = unlockState[0]; var setShowUnlock = unlockState[1];
+  var modeState = useState("church"); var appMode = modeState[0]; var setAppMode = modeState[1];
+
   useEffect(function() {
     if (page === "success" && !isPro) setShowUnlock(true);
   }, [page, isPro]);
+
   var renderPage = function() {
-    var props = { navigate:navigate, isPro:isPro, onUnlockClick:function() { setShowUnlock(true); } };
-    if (page === "home") return React.createElement(HomePage, props);
-    if (page === "analyze") return React.createElement(AnalyzePage, props);
-    if (page === "pricing") return React.createElement(PricingPage, props);
-    if (page === "success") return React.createElement(SuccessPage, props);
+    var props = { navigate:navigate, isPro:isPro, onUnlockClick:function() { setShowUnlock(true); }, appMode:appMode };
+    if (page === "home")      return React.createElement(HomePage, props);
+    if (page === "analyze")   return React.createElement(AnalyzePage, props);
+    if (page === "pricing")   return React.createElement(PricingPage, props);
+    if (page === "success")   return React.createElement(SuccessPage, props);
+    if (page === "history")   return React.createElement(HistoryPage, props);
+    if (page === "checklist") return React.createElement(SundayChecklist, props);
+    if (page === "chat")      return React.createElement(AIChatPage, Object.assign({}, props));
     return React.createElement(HomePage, props);
   };
+
   return (
     <div>
-      <Nav navigate={navigate} page={page} isPro={isPro} onUnlockClick={function() { setShowUnlock(true); }} />
+      <Nav navigate={navigate} page={page} isPro={isPro} onUnlockClick={function() { setShowUnlock(true); }} appMode={appMode} setAppMode={setAppMode} />
       {renderPage()}
       {page !== "success" && <Footer navigate={navigate} />}
       {showUnlock && <ProUnlockModal onClose={function() { setShowUnlock(false); }} onUnlock={unlockPro} />}
