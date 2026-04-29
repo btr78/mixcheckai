@@ -507,11 +507,18 @@ function Nav({ navigate, page, isPro, onUnlockClick, appMode, setAppMode }) {
     <nav style={{ position:"fixed", top:0, left:0, right:0, zIndex:100, background: scrolled ? "rgba(7,9,15,0.93)" : "transparent", backdropFilter: scrolled ? "blur(14px)" : "none", borderBottom: scrolled ? "1px solid rgba(255,255,255,0.06)" : "none", padding:"0 20px", transition:"all 0.3s" }}>
       <div style={{ maxWidth:1000, margin:"0 auto", height:60, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
         <button onClick={function() { navigate("home"); }} style={{ background:"none", border:"none", cursor:"pointer", display:"flex", alignItems:"center", gap:9 }}>
-          <div style={{ width:30, height:30, borderRadius:8, background:"linear-gradient(135deg,#00e5a0,#00b880)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:15 }}>🎛</div>
-          <span style={{ fontFamily:"monospace", fontWeight:700, fontSize:15, color:"#fff" }}>MixCheck <span style={{ color:"#00e5a0" }}>AI</span></span>
+          <div style={{ width:30, height:30, borderRadius:8, background:"linear-gradient(135deg,#00e5a0,#00b880)", display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden" }}>
+            <svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect x="2" y="9" width="3" height="7" rx="1.5" fill="#07090f" opacity="0.85"/>
+              <rect x="7" y="6" width="3" height="10" rx="1.5" fill="#07090f" opacity="0.85"/>
+              <rect x="12" y="3" width="3" height="16" rx="1.5" fill="#07090f" opacity="0.85"/>
+              <rect x="17" y="7" width="3" height="9" rx="1.5" fill="#07090f" opacity="0.85"/>
+            </svg>
+          </div>
+          <span style={{ fontFamily:"'DM Sans',sans-serif", fontWeight:700, fontSize:15, color:"#fff", letterSpacing:"-0.3px" }}>MixCheck <span style={{ color:"#00e5a0", fontWeight:300 }}>AI</span></span>
         </button>
         <div style={{ display:"flex", gap:4, alignItems:"center", overflowX:"auto" }}>
-          {[["home","Home"],["analyze","Analyze"],["checklist","Checklist"],["history","History"],["chat","AI"],["pricing","Pricing"]].map(function(item) {
+          {[["home","Home"],["analyze","Analyze"],["checklist","Checklist"],["history","History"],["chat","AI"],["pricing","Pricing"],["about","About"]].map(function(item) {
             var p = item[0]; var label = item[1];
             return (
               <button key={p} onClick={function() { navigate(p); }} style={{ background: page===p ? "rgba(0,229,160,0.1)" : "none", border: page===p ? "1px solid rgba(0,229,160,0.25)" : "1px solid transparent", borderRadius:8, padding:"6px 10px", cursor:"pointer", color: page===p ? "#00e5a0" : "#6b7280", fontSize:12, fontFamily:"sans-serif", fontWeight: page===p ? 600 : 400, whiteSpace:"nowrap", flexShrink:0 }}>{label}</button>
@@ -533,7 +540,7 @@ function Nav({ navigate, page, isPro, onUnlockClick, appMode, setAppMode }) {
           )}
         </div>
       </div>
-      <style>{`* { box-sizing:border-box; } @keyframes wave { from{transform:scaleY(0.35)} to{transform:scaleY(1)} } @keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-7px)} } @keyframes fadein { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} } @keyframes spin { to{transform:rotate(360deg)} } @keyframes glow { 0%,100%{box-shadow:0 0 20px rgba(0,229,160,0.15)} 50%{box-shadow:0 0 40px rgba(0,229,160,0.35)} } html { scroll-behavior:smooth; }`}</style>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&display=swap'); * { box-sizing:border-box; } @keyframes wave { from{transform:scaleY(0.35)} to{transform:scaleY(1)} } @keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-7px)} } @keyframes fadein { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} } @keyframes spin { to{transform:rotate(360deg)} } @keyframes glow { 0%,100%{box-shadow:0 0 20px rgba(0,229,160,0.15)} 50%{box-shadow:0 0 40px rgba(0,229,160,0.35)} } html { scroll-behavior:smooth; }`}</style>
     </nav>
   );
 }
@@ -544,13 +551,20 @@ function Footer({ navigate }) {
       <div style={{ maxWidth:1000, margin:"0 auto", display:"flex", flexWrap:"wrap", justifyContent:"space-between", alignItems:"center", gap:20 }}>
         <div>
           <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
-            <div style={{ width:24, height:24, borderRadius:6, background:"linear-gradient(135deg,#00e5a0,#00b880)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:12 }}>🎛</div>
-            <span style={{ fontFamily:"monospace", fontWeight:700, fontSize:14, color:"#fff" }}>MixCheck AI</span>
+            <div style={{ width:24, height:24, borderRadius:6, background:"linear-gradient(135deg,#00e5a0,#00b880)", display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden" }}>
+              <svg width="18" height="18" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect x="2" y="9" width="3" height="7" rx="1.5" fill="#07090f" opacity="0.85"/>
+                <rect x="7" y="6" width="3" height="10" rx="1.5" fill="#07090f" opacity="0.85"/>
+                <rect x="12" y="3" width="3" height="16" rx="1.5" fill="#07090f" opacity="0.85"/>
+                <rect x="17" y="7" width="3" height="9" rx="1.5" fill="#07090f" opacity="0.85"/>
+              </svg>
+            </div>
+            <span style={{ fontFamily:"'DM Sans',sans-serif", fontWeight:700, fontSize:14, color:"#fff", letterSpacing:"-0.3px" }}>MixCheck AI</span>
           </div>
           <p style={{ fontSize:12, color:"#2a3040", fontFamily:"sans-serif", margin:0 }}>Built for sound tech volunteers everywhere</p>
         </div>
         <div style={{ display:"flex", gap:20 }}>
-          {[["home","Home"],["pricing","Pricing"],["analyze","Analyze Free"]].map(function(item) {
+          {[["home","Home"],["pricing","Pricing"],["analyze","Analyze Free"],["about","About Us"]].map(function(item) {
             return <button key={item[0]} onClick={function() { navigate(item[0]); }} style={{ background:"none", border:"none", cursor:"pointer", fontSize:12, color:"#4a5568", fontFamily:"sans-serif" }}>{item[1]}</button>;
           })}
           <a href={STRIPE_PORTAL_LINK} target="_blank" rel="noopener noreferrer"
@@ -1972,6 +1986,167 @@ function SuccessPage({ navigate, isPro, onUnlockClick }) {
   );
 }
 
+function AboutPage({ navigate, onUnlockClick, isPro }) {
+  var STATS = [
+    { num:"25+", label:"Mixers Supported" },
+    { num:"11", label:"Instrument Cheat Sheets" },
+    { num:"-16", label:"LUFS Target for Streams" },
+    { num:"2hrs", label:"Max Recording Length" },
+  ];
+  var VALUES = [
+    { icon:"🎛", title:"Built by a volunteer, for volunteers", body:"MixCheck AI was not built in a corporate office. It was built after a Sunday service by a church sound tech who was tired of guessing why the livestream sounded different from the room. Every feature exists because a real volunteer needed it." },
+    { icon:"🙏", title:"The church deserves great audio", body:"Online worship is ministry. The family watching from home because they are sick, the diaspora tuning in from across the world, the person who found your church on YouTube at 2am - they all deserve to hear clearly. Great sound is not a luxury. It is hospitality." },
+    { icon:"🌍", title:"No audio degree required", body:"Most church sound engineers are volunteers with full-time jobs, families, and maybe two hours of training. MixCheck AI speaks plain English. No jargon. No assumptions. If you can tap a button, you can improve your mix." },
+    { icon:"💡", title:"Real measurements, real advice", body:"We analyze your actual recording. Not a simulation. Not generic tips that apply to everyone and help no one. Your file. Your mix. Your measurements. Specific recommendations for your situation." },
+  ];
+  return (
+    <div style={{ background:"#07090f", minHeight:"100vh", color:"#e8eaf0", fontFamily:"Georgia,serif" }}>
+
+      {/* Hero */}
+      <section style={{ paddingTop:140, paddingBottom:80, paddingLeft:20, paddingRight:20, textAlign:"center", position:"relative", overflow:"hidden" }}>
+        <div style={{ position:"absolute", top:"20%", left:"50%", transform:"translateX(-50%)", width:700, height:500, background:"radial-gradient(ellipse,rgba(0,229,160,0.06) 0%,transparent 70%)", pointerEvents:"none" }} />
+        <div style={{ display:"inline-flex", alignItems:"center", gap:8, background:"rgba(0,229,160,0.08)", border:"1px solid rgba(0,229,160,0.2)", borderRadius:999, padding:"6px 18px", marginBottom:28 }}>
+          <div style={{ width:6, height:6, borderRadius:"50%", background:"#00e5a0" }} />
+          <span style={{ fontSize:12, color:"#00e5a0", fontFamily:"sans-serif", fontWeight:600, letterSpacing:1 }}>Our Story</span>
+        </div>
+        <h1 style={{ fontSize:"clamp(30px,6vw,62px)", fontWeight:900, lineHeight:1.05, margin:"0 0 24px", color:"#fff", maxWidth:720, marginLeft:"auto", marginRight:"auto", letterSpacing:-2 }}>
+          Built by a church volunteer.<br /><span style={{ color:"#00e5a0", fontStyle:"italic" }}>For every church volunteer.</span>
+        </h1>
+        <p style={{ fontSize:"clamp(14px,2vw,18px)", color:"#6b7280", maxWidth:560, margin:"0 auto 48px", lineHeight:1.8, fontFamily:"sans-serif" }}>
+          This tool exists because one Sunday, the room sounded amazing and the livestream sounded terrible. We could not figure out why. So we built the answer.
+        </p>
+        {/* Stats */}
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))", gap:14, maxWidth:680, margin:"0 auto" }}>
+          {STATS.map(function(s, i) {
+            return (
+              <div key={i} style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:14, padding:"20px 16px" }}>
+                <div style={{ fontSize:32, fontWeight:900, color:"#00e5a0", letterSpacing:-1, fontFamily:"sans-serif" }}>{s.num}</div>
+                <div style={{ fontSize:11, color:"#6b7280", fontFamily:"sans-serif", marginTop:4 }}>{s.label}</div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* The Origin Story */}
+      <section style={{ padding:"80px 20px", background:"#060810" }}>
+        <div style={{ maxWidth:720, margin:"0 auto" }}>
+          <div style={{ fontSize:10, letterSpacing:4, color:"#00e5a0", fontFamily:"monospace", fontWeight:700, marginBottom:20 }}>THE ORIGIN STORY</div>
+          <div style={{ background:"#0d1017", border:"1px solid rgba(0,229,160,0.15)", borderRadius:20, padding:"36px 32px", position:"relative", overflow:"hidden" }}>
+            <div style={{ position:"absolute", top:-40, right:-40, width:200, height:200, background:"radial-gradient(circle,rgba(0,229,160,0.06),transparent 70%)", pointerEvents:"none" }} />
+
+            <div style={{ fontSize:48, marginBottom:20 }}>🎛</div>
+            <p style={{ fontSize:16, color:"#c8d0e0", lineHeight:1.9, marginBottom:20, fontFamily:"sans-serif" }}>
+              It was a regular Sunday. The worship band was on fire. The room was full of energy. People were singing loudly. The sound was hitting right - the kind of mix that makes you close your eyes and just be present.
+            </p>
+            <p style={{ fontSize:16, color:"#c8d0e0", lineHeight:1.9, marginBottom:20, fontFamily:"sans-serif" }}>
+              Then someone from home messaged: <span style={{ color:"#fff", fontStyle:"italic" }}>"We can barely hear anything on the stream."</span>
+            </p>
+            <p style={{ fontSize:16, color:"#c8d0e0", lineHeight:1.9, marginBottom:20, fontFamily:"sans-serif" }}>
+              That is the moment MixCheck AI was born. Not in a startup incubator. Not in a boardroom. At a mixing console, after service, wondering why the livestream and the room sound so different - and realizing there was no simple tool to measure it, explain it, and fix it.
+            </p>
+            <p style={{ fontSize:16, color:"#c8d0e0", lineHeight:1.9, marginBottom:28, fontFamily:"sans-serif" }}>
+              We are sound tech volunteers. We work Monday to Friday, serve on Sundays, and learn as we go. We built MixCheck AI because we needed it ourselves - and because we knew thousands of volunteers just like us needed it too.
+            </p>
+            <div style={{ borderLeft:"3px solid #00e5a0", paddingLeft:20 }}>
+              <p style={{ fontSize:18, color:"#fff", lineHeight:1.7, fontStyle:"italic", fontFamily:"Georgia,serif" }}>
+                "Every church deserves to sound great online. Not just the big ones with professional engineers and expensive gear. Every church. Every volunteer. Every Sunday."
+              </p>
+              <p style={{ fontSize:13, color:"#4a5568", marginTop:12, fontFamily:"sans-serif" }}>- The MixCheck AI Team</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Values */}
+      <section style={{ padding:"80px 20px" }}>
+        <div style={{ maxWidth:900, margin:"0 auto" }}>
+          <div style={{ textAlign:"center", marginBottom:52 }}>
+            <div style={{ fontSize:10, letterSpacing:4, color:"#4a7cff", fontFamily:"monospace", fontWeight:700, marginBottom:14 }}>WHAT WE BELIEVE</div>
+            <h2 style={{ fontSize:"clamp(24px,4vw,40px)", fontWeight:900, margin:0, letterSpacing:-1.5, color:"#fff" }}>Why we built this.</h2>
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))", gap:16 }}>
+            {VALUES.map(function(v, i) {
+              return (
+                <div key={i} style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:16, padding:"28px 24px" }}>
+                  <div style={{ fontSize:32, marginBottom:16 }}>{v.icon}</div>
+                  <h3 style={{ fontSize:16, fontWeight:800, color:"#fff", marginBottom:12, lineHeight:1.3, fontFamily:"sans-serif" }}>{v.title}</h3>
+                  <p style={{ fontSize:13, color:"#6b7280", lineHeight:1.8, margin:0, fontFamily:"sans-serif" }}>{v.body}</p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      {/* Encouragement section */}
+      <section style={{ padding:"80px 20px", background:"#060810" }}>
+        <div style={{ maxWidth:720, margin:"0 auto", textAlign:"center" }}>
+          <div style={{ fontSize:10, letterSpacing:4, color:"#ffb347", fontFamily:"monospace", fontWeight:700, marginBottom:20 }}>TO EVERY SOUND VOLUNTEER</div>
+          <h2 style={{ fontSize:"clamp(24px,4vw,40px)", fontWeight:900, letterSpacing:-1.5, margin:"0 0 32px", color:"#fff", lineHeight:1.1 }}>
+            You are doing something that matters.
+          </h2>
+
+          <div style={{ display:"flex", flexDirection:"column", gap:20, textAlign:"left", marginBottom:48 }}>
+            {[
+              { icon:"🌟", text:"You show up early when everyone else is still asleep. You set up cables, check gains, ring out monitors, and solve problems nobody else even notices. You do it for free. You do it faithfully. That is not small - that is extraordinary." },
+              { icon:"💪", text:"You did not go to audio school. You learned by doing, by watching YouTube at midnight, by trial and error on Sunday mornings. That makes you resourceful. That makes you adaptable. That makes you exactly the kind of engineer who can handle anything." },
+              { icon:"🎵", text:"The worship that happens in that room is beautiful. But the family watching from a care home, the person streaming from another country, the young adult who found your church online - they experience that worship through YOU. Through your mix. Through your care. You are extending the ministry beyond four walls." },
+              { icon:"🙌", text:"And here is the truth: good sound is not about perfection. It is about faithfulness. Keep learning. Keep improving. Keep showing up. A score of 52 that becomes 78 over three months is not a technical improvement - it is a testimony." },
+            ].map(function(item, i) {
+              return (
+                <div key={i} style={{ display:"flex", gap:16, alignItems:"flex-start", background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:14, padding:"20px 22px" }}>
+                  <div style={{ fontSize:24, flexShrink:0 }}>{item.icon}</div>
+                  <p style={{ fontSize:14, color:"#c8d0e0", lineHeight:1.8, margin:0, fontFamily:"sans-serif" }}>{item.text}</p>
+                </div>
+              );
+            })}
+          </div>
+
+          <div style={{ background:"linear-gradient(135deg,rgba(0,229,160,0.08),rgba(0,229,160,0.02))", border:"1.5px solid rgba(0,229,160,0.25)", borderRadius:20, padding:"36px 28px" }}>
+            <div style={{ fontSize:40, marginBottom:16 }}>🎚</div>
+            <h3 style={{ fontSize:"clamp(20px,3vw,28px)", fontWeight:900, color:"#fff", marginBottom:14, letterSpacing:-1, fontFamily:"sans-serif" }}>
+              You are not alone behind that console.
+            </h3>
+            <p style={{ fontSize:15, color:"#8892a4", lineHeight:1.8, marginBottom:24, fontFamily:"sans-serif", maxWidth:500, marginLeft:"auto", marginRight:"auto" }}>
+              MixCheck AI is your tool, your guide, and your backup. Whenever you are not sure - upload the recording, get your score, read the recommendations. We have got you.
+            </p>
+            <div style={{ display:"flex", gap:12, justifyContent:"center", flexWrap:"wrap" }}>
+              <button onClick={function() { navigate("analyze"); }} style={{ background:"#00e5a0", color:"#07090f", border:"none", borderRadius:10, padding:"13px 28px", fontSize:14, fontFamily:"sans-serif", fontWeight:800, cursor:"pointer" }}>Analyze My Mix Free</button>
+              <button onClick={function() { navigate("checklist"); }} style={{ background:"transparent", color:"#6b7280", border:"1px solid #1a1f2e", borderRadius:10, padding:"13px 28px", fontSize:14, fontFamily:"sans-serif", fontWeight:600, cursor:"pointer" }}>Sunday Checklist</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Community */}
+      <section style={{ padding:"80px 20px" }}>
+        <div style={{ maxWidth:720, margin:"0 auto", textAlign:"center" }}>
+          <div style={{ fontSize:10, letterSpacing:4, color:"#00e5a0", fontFamily:"monospace", fontWeight:700, marginBottom:20 }}>BUILT WITH LOVE</div>
+          <h2 style={{ fontSize:"clamp(22px,4vw,36px)", fontWeight:900, color:"#fff", marginBottom:16, letterSpacing:-1, fontFamily:"sans-serif" }}>
+            From one volunteer to another.
+          </h2>
+          <p style={{ fontSize:15, color:"#6b7280", lineHeight:1.8, marginBottom:32, fontFamily:"sans-serif" }}>
+            MixCheck AI is built and maintained by a Filipino-Canadian church sound volunteer working 3 hours a day after work. Every feature you use was designed in real church environments, tested on real recordings, and refined based on real feedback from volunteers like you.
+          </p>
+          <div style={{ display:"flex", gap:16, justifyContent:"center", flexWrap:"wrap", marginBottom:40 }}>
+            {["🇨🇦 Canadian built","🇵🇭 Filipino heart","⛪ Church focused","🎛 Volunteer tested"].map(function(t, i) {
+              return (
+                <div key={i} style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:99, padding:"8px 18px", fontSize:13, color:"#c8d0e0", fontFamily:"sans-serif" }}>{t}</div>
+              );
+            })}
+          </div>
+          <p style={{ fontSize:14, color:"#4a5568", fontFamily:"sans-serif", lineHeight:1.7 }}>
+            Questions, feedback, or just want to say hi?<br />
+            <a href="mailto:hello@mixcheckai.com" style={{ color:"#00e5a0", textDecoration:"none", fontWeight:700 }}>hello@mixcheckai.com</a>
+          </p>
+        </div>
+      </section>
+
+    </div>
+  );
+}
+
 export default function App() {
   var routerResult = useRouter();
   var page = routerResult.page; var navigate = routerResult.navigate;
@@ -1993,6 +2168,7 @@ export default function App() {
     if (page === "history")   return React.createElement(HistoryPage, props);
     if (page === "checklist") return React.createElement(SundayChecklist, props);
     if (page === "chat")      return React.createElement(AIChatPage, Object.assign({}, props));
+    if (page === "about")     return React.createElement(AboutPage, props);
     return React.createElement(HomePage, props);
   };
 
