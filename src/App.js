@@ -1466,31 +1466,102 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
 
         {step === 1 && (
           <div style={{ animation:"fadein 0.3s ease" }}>
-            <div style={{ fontSize:13, color:"#6b7280", fontFamily:"sans-serif", marginBottom:20 }}>Select your mixer for best results. Works with any mixer.</div>
-            {MIXER_GROUPS.map(function(g, gi) {
-              return (
-                <div key={gi} style={{ marginBottom:20 }}>
-                  <div style={{ fontSize:10, letterSpacing:3, color:"#4a5568", fontFamily:"monospace", fontWeight:700, marginBottom:10 }}>{g.label.toUpperCase()}</div>
-                  <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))", gap:8 }}>
-                    {g.mixers.map(function(m) {
-                      var selected = mixer && mixer.id === m.id;
-                      return (
-                        <button key={m.id} onClick={function() { setMixer(m); setShowCustom(false); setStep(2); }}
-                          style={{ background: selected?"rgba(0,229,160,0.1)":"#0d1017", border: selected?"1.5px solid #00e5a0":"1px solid #1a1f2e", borderRadius:10, padding:"12px 10px", cursor:"pointer", textAlign:"left" }}>
-                          <div style={{ fontSize:13, fontWeight:700, color:"#e8eaf0", fontFamily:"sans-serif", marginBottom:4 }}>{m.name}</div>
-                          <div style={{ fontSize:9, color: m.type==="digital"?"#4a7cff":"#ffb347", background: m.type==="digital"?"rgba(74,124,255,0.1)":"rgba(255,179,71,0.1)", padding:"2px 6px", borderRadius:4, fontFamily:"monospace", fontWeight:700, display:"inline-block" }}>{m.type.toUpperCase()}</div>
-                          <div style={{ fontSize:9, color:"#2a3040", fontFamily:"sans-serif", marginTop:4 }}>{m.streams}</div>
-                        </button>
-                      );
-                    })}
+            <div style={{ fontSize:13, color:"#6b7280", fontFamily:"sans-serif", marginBottom:16 }}>Select your mixer for best results. Works with any mixer.</div>
+
+            {/* Search box */}
+            <div style={{ position:"relative", marginBottom:20 }}>
+              <input
+                placeholder="Search your mixer e.g. QU-24, X32, TF1..."
+                value={customMixer}
+                onChange={function(e) { setCustomMixer(e.target.value); setShowCustom(false); setMixer(null); }}
+                style={{ width:"100%", background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:10, padding:"12px 16px 12px 40px", color:"#e8eaf0", fontSize:13, fontFamily:"sans-serif", outline:"none" }}
+              />
+              <div style={{ position:"absolute", left:14, top:"50%", transform:"translateY(-50%)", fontSize:14, opacity:0.4 }}>🔍</div>
+              {customMixer.trim() && (
+                <button onClick={function() { setCustomMixer(""); setShowCustom(false); }}
+                  style={{ position:"absolute", right:12, top:"50%", transform:"translateY(-50%)", background:"none", border:"none", color:"#4a5568", fontSize:16, cursor:"pointer", lineHeight:1 }}>
+                  x
+                </button>
+              )}
+            </div>
+
+            {/* Filtered mixer groups */}
+            {(function() {
+              var query = customMixer.trim().toLowerCase();
+              var filteredGroups = MIXER_GROUPS.map(function(g) {
+                return {
+                  label: g.label,
+                  mixers: g.mixers.filter(function(m) {
+                    return !query || m.name.toLowerCase().indexOf(query) !== -1 || g.label.toLowerCase().indexOf(query) !== -1;
+                  })
+                };
+              }).filter(function(g) { return g.mixers.length > 0; });
+
+              var totalFound = filteredGroups.reduce(function(acc, g) { return acc + g.mixers.length; }, 0);
+
+              if (query && totalFound === 0) {
+                return (
+                  <div style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:14, padding:"32px 24px", textAlign:"center", marginBottom:20 }}>
+                    <div style={{ fontSize:36, marginBottom:14 }}>🎛</div>
+                    <div style={{ fontSize:15, fontWeight:800, color:"#e8eaf0", fontFamily:"sans-serif", marginBottom:8 }}>
+                      Mixer not found
+                    </div>
+                    <div style={{ fontSize:13, color:"#6b7280", fontFamily:"sans-serif", lineHeight:1.7, marginBottom:20, maxWidth:340, margin:"0 auto 20px" }}>
+                      We do not have <span style={{ color:"#ffb347", fontWeight:600 }}>"{customMixer}"</span> in our list yet. Try a different spelling, or scroll down to use it as a custom mixer - our recommendations still work on any board.
+                    </div>
+                    <div style={{ display:"flex", gap:10, justifyContent:"center", flexWrap:"wrap" }}>
+                      <button onClick={function() { setCustomMixer(""); }}
+                        style={{ background:"#1a1f2e", color:"#e8eaf0", border:"none", borderRadius:8, padding:"9px 20px", fontSize:13, fontFamily:"sans-serif", fontWeight:600, cursor:"pointer" }}>
+                        Try again
+                      </button>
+                      <button onClick={function() { setShowCustom(true); setStep(2); }}
+                        style={{ background:"#00e5a0", color:"#07090f", border:"none", borderRadius:8, padding:"9px 20px", fontSize:13, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer" }}>
+                        Use "{customMixer}" anyway
+                      </button>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-            <div style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:12, padding:"16px" }}>
-              <div style={{ fontSize:11, color:"#ffb347", fontFamily:"monospace", fontWeight:700, letterSpacing:2, marginBottom:12 }}>MY MIXER IS NOT LISTED</div>
+                );
+              }
+
+              return filteredGroups.map(function(g, gi) {
+                return (
+                  <div key={gi} style={{ marginBottom:20 }}>
+                    <div style={{ fontSize:10, letterSpacing:3, color:"#4a5568", fontFamily:"monospace", fontWeight:700, marginBottom:10 }}>{g.label.toUpperCase()}</div>
+                    <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))", gap:8 }}>
+                      {g.mixers.map(function(m) {
+                        var selected = mixer && mixer.id === m.id;
+                        return (
+                          <button key={m.id} onClick={function() { setMixer(m); setShowCustom(false); setCustomMixer(""); setStep(2); }}
+                            style={{ background: selected?"rgba(0,229,160,0.1)":"#0d1017", border: selected?"1.5px solid #00e5a0":"1px solid #1a1f2e", borderRadius:10, padding:"12px 10px", cursor:"pointer", textAlign:"left" }}>
+                            <div style={{ fontSize:13, fontWeight:700, color:"#e8eaf0", fontFamily:"sans-serif", marginBottom:4 }}>{m.name}</div>
+                            <div style={{ fontSize:9, color: m.type==="digital"?"#4a7cff":"#ffb347", background: m.type==="digital"?"rgba(74,124,255,0.1)":"rgba(255,179,71,0.1)", padding:"2px 6px", borderRadius:4, fontFamily:"monospace", fontWeight:700, display:"inline-block" }}>{m.type.toUpperCase()}</div>
+                            <div style={{ fontSize:9, color:"#2a3040", fontFamily:"sans-serif", marginTop:4 }}>{m.streams}</div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              });
+            })()}
+
+            {/* Custom mixer option - only show when search has no matches or is empty */}
+            {(function() {
+              var query = customMixer.trim().toLowerCase();
+              var totalFound = MIXER_GROUPS.reduce(function(acc, g) {
+                return acc + g.mixers.filter(function(m) {
+                  return !query || m.name.toLowerCase().indexOf(query) !== -1;
+                }).length;
+              }, 0);
+              if (totalFound > 0 || !query) return null;
+              return null; // handled by the "try again" block above
+            })()}
+
+            <div style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:12, padding:"16px", marginTop:8 }}>
+              <div style={{ fontSize:11, color:"#ffb347", fontFamily:"monospace", fontWeight:700, letterSpacing:2, marginBottom:10 }}>MY MIXER IS NOT IN THE LIST</div>
+              <div style={{ fontSize:12, color:"#6b7280", fontFamily:"sans-serif", lineHeight:1.6, marginBottom:12 }}>No problem - type your mixer name and we will give you general recommendations that work on any board.</div>
               <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
-                <input placeholder="Type your mixer name" value={customMixer}
+                <input placeholder="e.g. Mackie 1642, Soundcraft Signature" value={showCustom ? customMixer : ""}
                   onChange={function(e) { setCustomMixer(e.target.value); setShowCustom(true); setMixer(null); }}
                   style={{ flex:1, minWidth:180, background:"#060810", border:"1px solid #1a1f2e", borderRadius:8, padding:"10px 14px", color:"#e8eaf0", fontSize:13, fontFamily:"sans-serif", outline:"none" }} />
                 <button onClick={function() { if(customMixer.trim()) { setShowCustom(true); setStep(2); } }} disabled={!customMixer.trim()}
@@ -1498,6 +1569,32 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
                   Use This
                 </button>
               </div>
+              {(function() {
+                if (!showCustom || !customMixer.trim()) return null;
+                var q = customMixer.trim().toLowerCase();
+                var found = MIXER_GROUPS.some(function(g) {
+                  return g.mixers.some(function(m) {
+                    return m.name.toLowerCase().indexOf(q) !== -1;
+                  });
+                });
+                if (!found && customMixer.trim().length >= 2) {
+                  return (
+                    <div style={{ marginTop:10, display:"flex", alignItems:"center", gap:8 }}>
+                      <span style={{ fontSize:12, color:"#ff5757", fontFamily:"sans-serif" }}>
+                        Mixer not found.
+                      </span>
+                      <button onClick={function() { setCustomMixer(""); setShowCustom(false); }}
+                        style={{ background:"none", border:"none", fontSize:12, color:"#00e5a0", fontFamily:"sans-serif", fontWeight:700, cursor:"pointer", padding:0, textDecoration:"underline" }}>
+                        Try again
+                      </button>
+                      <span style={{ fontSize:11, color:"#4a5568", fontFamily:"sans-serif" }}>
+                        or press Use This to continue with general settings.
+                      </span>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
             </div>
           </div>
         )}
