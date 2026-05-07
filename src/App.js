@@ -417,6 +417,16 @@ const VALID_CODE_HASHES = [
   btoa("MIXPRO2026"),
   btoa("CHURCHPRO1"),
   btoa("SOUNDTECH1"),
+  btoa("WORSHIP2026"),
+  btoa("STREAMFIX1"),
+  btoa("SUNDAY2026"),
+  btoa("CHURCHAV01"),
+  btoa("MIXCHECK1"),
+  btoa("VOLUNTEER1"),
+  btoa("GUMROAD2026"),
+  btoa("PROVOLUNTEER"),
+  btoa("AUDIOTECH26"),
+  btoa("BLESSED2026"),
 ];
 
 function usePro() {
