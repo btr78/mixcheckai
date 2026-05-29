@@ -15,6 +15,8 @@ export default async function handler(req, res) {
     var audioBase64 = body.audioBase64;
     var deviceId = (body.deviceId || "").trim();
     var isTrial = !!body.isTrial;
+    // Credits to deduct: 1 per 5 min of audio (client calculates, server validates)
+    var creditsNeeded = Math.max(1, Math.min(20, parseInt(body.creditsNeeded || "1", 10)));
 
     if (!audioBase64) {
       return res.status(400).json({ error: "No audio provided" });
@@ -40,37 +42,46 @@ export default async function handler(req, res) {
 
       if (!isLifetime) {
         if (isTrial) {
-          // Trial: max 3 total (existing logic)
+          // Trial: max 3 total regardless of file length (client byte-slices to ~3 min)
           var trialCount = parseInt((await kvPost(["GET", "stems:" + deviceId])).result || "0", 10);
           if (trialCount >= 3) {
             return res.status(403).json({ error: "You've used all 3 trial stem separations. Unlimited monthly access starts when your trial converts to a paid subscription." });
           }
           await kvPost(["SET", "stems:" + deviceId, String(trialCount + 1), "EX", 691200]);
         } else {
-          // Paid subscriber: 10/month + bonus credits
+          // Paid subscriber: deduct creditsNeeded from monthly quota + bonus credits
           var month = new Date().toISOString().slice(0, 7);
           var monthKey = "stems_monthly:" + deviceId + ":" + month;
           var monthlyUsed = parseInt((await kvPost(["GET", monthKey])).result || "0", 10);
           var credits = parseInt((await kvPost(["GET", "stems_credits:" + deviceId])).result || "0", 10);
 
-          if (monthlyUsed >= MONTHLY_LIMIT) {
-            if (credits <= 0) {
-              return res.status(403).json({
-                error: "Monthly limit reached",
-                monthly_used: monthlyUsed,
-                monthly_limit: MONTHLY_LIMIT,
-                credits: 0,
-              });
-            }
-            // Deduct a bonus credit
-            await kvPost(["DECRBY", "stems_credits:" + deviceId, 1]);
-            credits = credits - 1;
-          } else {
-            // Use monthly allowance (35-day TTL ensures cleanup after month ends)
-            await kvPost(["SET", monthKey, String(monthlyUsed + 1), "EX", 3024000]);
-            monthlyUsed = monthlyUsed + 1;
+          var monthlyRemaining = Math.max(0, MONTHLY_LIMIT - monthlyUsed);
+          var totalAvailable = monthlyRemaining + credits;
+
+          if (totalAvailable < creditsNeeded) {
+            return res.status(403).json({
+              error: creditsNeeded > 1
+                ? "Not enough credits for this file (" + creditsNeeded + " needed, " + totalAvailable + " available). Buy more or upload a shorter clip."
+                : "Monthly limit reached",
+              monthly_used: monthlyUsed,
+              monthly_limit: MONTHLY_LIMIT,
+              credits: credits,
+              credits_needed: creditsNeeded,
+            });
           }
-          // Attach balance to response (set on res.locals for use below)
+
+          // Deduct from monthly quota first, then bonus credits
+          var fromMonthly = Math.min(monthlyRemaining, creditsNeeded);
+          var fromBonus = creditsNeeded - fromMonthly;
+          if (fromMonthly > 0) {
+            await kvPost(["SET", monthKey, String(monthlyUsed + fromMonthly), "EX", 3024000]);
+            monthlyUsed = monthlyUsed + fromMonthly;
+          }
+          if (fromBonus > 0) {
+            await kvPost(["DECRBY", "stems_credits:" + deviceId, fromBonus]);
+            credits = credits - fromBonus;
+          }
+          // Attach balance to response
           res.locals = res.locals || {};
           res.locals.stemsBalance = { monthly_used: monthlyUsed, monthly_limit: MONTHLY_LIMIT, credits: credits };
         }

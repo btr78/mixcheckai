@@ -437,6 +437,12 @@ function getDeviceId() {
 var TRIAL_STEM_LIMIT = 3;
 var TRIAL_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
 var TRIAL_MAX_SECONDS = 120; // 2 minutes
+var MINS_PER_STEM_CREDIT = 5; // 1 credit per 5 minutes of audio
+
+function calcStemCredits(durationSecs) {
+  if (!durationSecs || durationSecs <= 0) return 1;
+  return Math.max(1, Math.ceil(durationSecs / (MINS_PER_STEM_CREDIT * 60)));
+}
 
 function getTrialInfo() {
   try {
@@ -1681,17 +1687,21 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
       setStemError("You've used all " + TRIAL_STEM_LIMIT + " trial stem separations. Unlimited access starts when your trial converts to a paid subscription.");
       setStemStatus("error"); return;
     }
+    // 3MB keeps the JSON body under Vercel's 4.5MB limit after base64 encoding
     var MAX_STEM_BYTES = 3 * 1024 * 1024;
     if (!trial.isTrial && file.size > MAX_STEM_BYTES) {
       setStemStatus("toolarge"); return;
     }
+    // Credits: 1 per 5 min of audio (trial always 1 since we byte-slice)
+    var durSecs = results && results.duration ? results.duration : 0;
+    var creditsNeeded = trial.isTrial ? 1 : calcStemCredits(durSecs);
     setStemStatus("loading"); setStemOutputs(null); setStemError("");
     var errMsg = "";
     try {
       var dataUrl;
       if (trial.isTrial) {
-        // Byte-slice to ~4MB (≈3 min of 128kbps MP3/AAC) — avoids AudioContext on iOS Safari
-        var TRIAL_BYTE_LIMIT = 4 * 1024 * 1024;
+        // Byte-slice to 3MB (≈3 min of 128kbps MP3/AAC, stays under Vercel body limit)
+        var TRIAL_BYTE_LIMIT = 3 * 1024 * 1024;
         var trialBlob = file.size > TRIAL_BYTE_LIMIT ? file.slice(0, TRIAL_BYTE_LIMIT) : file;
         dataUrl = await readFileAsDataURL(trialBlob);
       } else {
@@ -1700,7 +1710,7 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
       var resp = await fetch("/api/stems", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ audioBase64: dataUrl, deviceId: getDeviceId(), isTrial: trial.isTrial }),
+        body: JSON.stringify({ audioBase64: dataUrl, deviceId: getDeviceId(), isTrial: trial.isTrial, creditsNeeded: creditsNeeded }),
       });
       var data = await resp.json();
       if (!resp.ok) { errMsg = data.error || "Server error"; throw new Error(errMsg); }
@@ -2238,13 +2248,26 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
                       var isLifetime = bal && bal.isLifetime;
                       var monthlyLeft = bal ? Math.max(0, bal.monthly_limit - bal.monthly_used) : null;
                       var totalLeft = isLifetime ? Infinity : (bal ? (monthlyLeft + (bal.credits || 0)) : null);
-                      var outOfStems = !trial.isTrial && !isLifetime && bal && totalLeft <= 0;
+                      // Credits needed: 1 per 5 min of audio (trial always counts as 1 since we byte-slice)
+                      var durSecs = results && results.duration ? results.duration : 0;
+                      var creditsNeeded = trial.isTrial ? 1 : calcStemCredits(durSecs);
+                      var outOfStems = !trial.isTrial && !isLifetime && bal && totalLeft < creditsNeeded;
+                      var durMins = durSecs > 0 ? Math.round(durSecs / 60) : null;
                       return (
                         <div>
                           <div style={{ fontSize:13, color:"#6b7280", fontFamily:"sans-serif", lineHeight:1.6, marginBottom:10 }}>
                             Split this recording into drums, bass, vocals, and other instruments.
-                            {trial.isTrial && <span style={{ color:"#a78bfa" }}> Trial: first 2 min.</span>}
+                            {trial.isTrial && <span style={{ color:"#a78bfa" }}> Trial: first 2 min of audio sent.</span>}
                           </div>
+                          {/* Credit cost badge for multi-credit files */}
+                          {!trial.isTrial && !isLifetime && creditsNeeded > 1 && (
+                            <div style={{ display:"inline-flex", alignItems:"center", gap:6, background:"rgba(167,139,250,0.1)", border:"1px solid rgba(167,139,250,0.3)", borderRadius:6, padding:"4px 10px", marginBottom:10 }}>
+                              <span style={{ fontSize:11, color:"#a78bfa", fontFamily:"monospace", fontWeight:700 }}>
+                                ~{durMins} min = {creditsNeeded} credits
+                              </span>
+                              <span style={{ fontSize:10, color:"#4a5568", fontFamily:"sans-serif" }}>(1 per 5 min)</span>
+                            </div>
+                          )}
                           {/* Balance bar */}
                           {trial.isTrial && (
                             <div style={{ fontSize:11, color: trial.stemsLeft > 0 ? "#a78bfa" : "#ff5757", fontFamily:"monospace", fontWeight:700, marginBottom:10, letterSpacing:1 }}>
@@ -2264,20 +2287,22 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
                           )}
                           {outOfStems ? (
                             <div>
-                              <div style={{ fontSize:13, color:"#ff5757", fontFamily:"sans-serif", marginBottom:10 }}>Monthly limit reached. Buy more stems to continue.</div>
+                              <div style={{ fontSize:13, color:"#ff5757", fontFamily:"sans-serif", marginBottom:10 }}>
+                                {creditsNeeded > 1 ? "Not enough credits for this " + durMins + "-min file (" + creditsNeeded + " needed, " + totalLeft + " left)." : "Monthly limit reached."} Buy more to continue.
+                              </div>
                               <button onClick={function() { window.open(STRIPE_CREDITS_LINK,"_blank"); }} style={{ background:"linear-gradient(135deg,#7c3aed,#a78bfa)", color:"#fff", border:"none", borderRadius:8, padding:"10px 22px", fontSize:13, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer" }}>
                                 Buy 10 more stems — $2.99
                               </button>
                             </div>
                           ) : !trial.isTrial && file && file.size > 3*1024*1024 ? (
                             <div style={{ fontSize:12, color:"#ffb347", fontFamily:"sans-serif" }}>
-                              File is too large. Export a 1-3 minute clip as MP3 (128kbps) then re-upload.
+                              File is too large for stems. Export a 1-3 minute clip as MP3 (128kbps) then re-upload.
                             </div>
                           ) : (
                             <div style={{ display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
                               <button onClick={handleStemSeparation} disabled={trial.isTrial && trial.stemsLeft <= 0}
                                 style={{ background: trial.isTrial && trial.stemsLeft <= 0 ? "#2a2040" : "linear-gradient(135deg,#7c3aed,#a78bfa)", color: trial.isTrial && trial.stemsLeft <= 0 ? "#4a5568" : "#fff", border:"none", borderRadius:8, padding:"10px 22px", fontSize:13, fontFamily:"sans-serif", fontWeight:700, cursor: trial.isTrial && trial.stemsLeft <= 0 ? "not-allowed" : "pointer" }}>
-                                Separate Stems
+                                Separate Stems{creditsNeeded > 1 ? " (" + creditsNeeded + " credits)" : ""}
                               </button>
                               {!trial.isTrial && !isLifetime && monthlyLeft !== null && monthlyLeft <= 3 && totalLeft > 0 && (
                                 <button onClick={function() { window.open(STRIPE_CREDITS_LINK,"_blank"); }} style={{ background:"transparent", border:"1px solid rgba(167,139,250,0.3)", borderRadius:8, padding:"9px 16px", color:"#a78bfa", fontSize:12, fontFamily:"sans-serif", fontWeight:600, cursor:"pointer" }}>
