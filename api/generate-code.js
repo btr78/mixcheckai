@@ -10,7 +10,7 @@ export default async function handler(req, res) {
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
 
-  var sessionId = (req.query.session_id || "").trim();
+  var sessionId = (req.query.session_id || "").replace(/\s/g, "");
   if (!sessionId || !sessionId.startsWith("cs_")) {
     return res.status(400).json({ error: "Invalid session" });
   }

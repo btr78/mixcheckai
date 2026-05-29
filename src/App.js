@@ -2481,7 +2481,7 @@ function PricingPage({ navigate, isPro, onUnlockClick }) {
 }
 
 function SuccessPage({ navigate, isPro, unlockPro }) {
-  var sessionId = new URLSearchParams(window.location.search).get("session_id") || "";
+  var sessionId = (new URLSearchParams(window.location.search).get("session_id") || "").replace(/\s/g, "");
   var codeState = useState(""); var code = codeState[0]; var setCode = codeState[1];
   var statusState = useState(sessionId ? "loading" : "manual"); var codeStatus = statusState[0]; var setCsStatus = statusState[1];
   var copiedState = useState(false); var copied = copiedState[0]; var setCopied = copiedState[1];
