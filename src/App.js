@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 
 const STRIPE_PAYMENT_LINK = "https://buy.stripe.com/3cIcN6gBO375e6dbQkgbm03";
 const STRIPE_PAYMENT_LINK_NOTRIAL = "https://buy.stripe.com/dRmbJ271e9vte6d5rWgbm04"; // no-trial link — pay $9.99 today, unlimited stems immediately
-const STRIPE_CREDITS_LINK = "REPLACE_WITH_CREDITS_LINK"; // one-time $2.99 for 10 stem credits
+const STRIPE_CREDITS_LINK = "https://buy.stripe.com/3cI4gA85iePNaU1f2wgbm05"; // one-time $2.99 for 10 stem credits
 
 // ── STRIPE PAYMENT LINKS ──────────────────────────────────────────────────────
 const STRIPE_TEAM_LINK = "https://buy.stripe.com/3cIcN6gBO375e6dbQkgbm03"; // replace with team plan link
