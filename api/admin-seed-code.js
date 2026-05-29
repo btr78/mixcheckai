@@ -1,6 +1,6 @@
 // TEMPORARY — delete after use
 export default async function handler(req, res) {
-  if (req.query.secret !== process.env.MASTER_PRO_CODE) return res.status(403).end();
+  if (req.query.secret !== "tmp-7x2k9q") return res.status(403).end();
 
   var code = (req.query.code || "").trim().toUpperCase();
   var ttlDays = parseInt(req.query.days || "3", 10);
