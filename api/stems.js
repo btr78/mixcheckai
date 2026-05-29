@@ -34,10 +34,6 @@ export default async function handler(req, res) {
         input: {
           audio: audioBase64,
           model: "htdemucs",
-          stem: null,
-          two_stems: null,
-          int24: false,
-          float32: false,
           clip_mode: "rescale",
           shifts: 1,
           overlap: 0.25,

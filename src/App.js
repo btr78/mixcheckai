@@ -1566,7 +1566,8 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
     if (file.size > MAX_STEM_BYTES) {
       setStemStatus("toolarge"); return;
     }
-    setStemStatus("loading"); setStemOutputs(null);
+    setStemStatus("loading"); setStemOutputs(null); setStemError("");
+    var errMsg = "";
     try {
       var dataUrl = await new Promise(function(resolve, reject) {
         var rd = new FileReader();
@@ -1580,7 +1581,7 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
         body: JSON.stringify({ audioBase64: dataUrl }),
       });
       var data = await resp.json();
-      if (!resp.ok) { setStemError(data.error || "Server error"); throw new Error("server"); }
+      if (!resp.ok) { errMsg = data.error || "Server error"; throw new Error(errMsg); }
       var predId = data.predictionId;
       for (var attempt = 0; attempt < 72; attempt++) {
         await new Promise(function(r) { setTimeout(r, 5000); });
@@ -1588,10 +1589,11 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
         if (!sr2.ok) continue;
         var sd = await sr2.json();
         if (sd.status === "succeeded") { setStemOutputs(sd.output); setStemStatus("done"); return; }
-        if (sd.status === "failed" || sd.status === "canceled") throw new Error("failed");
+        if (sd.status === "failed" || sd.status === "canceled") { errMsg = "Stem separation failed on server"; throw new Error(errMsg); }
       }
-      throw new Error("timeout");
-    } catch (e) { if (!stemError) setStemError(e.message || "Unknown error"); setStemStatus("error"); }
+      errMsg = "Timed out — try a shorter file (under 3 min)";
+      throw new Error(errMsg);
+    } catch (e) { setStemError(errMsg || e.message || "Unknown error"); setStemStatus("error"); }
   }, [file]);
 
   useEffect(function() {
