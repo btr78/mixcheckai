@@ -2296,7 +2296,13 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
                             </div>
                           ) : !trial.isTrial && file && file.size > 3*1024*1024 ? (
                             <div style={{ fontSize:12, color:"#ffb347", fontFamily:"sans-serif" }}>
-                              File is too large for stems. Export a 1-3 minute clip as MP3 (128kbps) then re-upload.
+                              <div>
+                                <div style={{ fontSize:13, color:"#ffb347", fontFamily:"sans-serif", fontWeight:700, marginBottom:6 }}>File too long for stem separation</div>
+                                <div style={{ fontSize:12, color:"#6b7280", fontFamily:"sans-serif", lineHeight:1.7 }}>
+                                  Export just the specific song you want to practice (3–5 min MP3) and re-upload it here.<br/>
+                                  <span style={{ color:"#4a5568" }}>Tip: the full-length recording already works perfectly for the audio analyzer above.</span>
+                                </div>
+                              </div>
                             </div>
                           ) : (
                             <div style={{ display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
@@ -2324,9 +2330,13 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
                       </div>
                     )}
                     {stemStatus === "toolarge" && (
-                      <div style={{ fontSize:13, color:"#ffb347", fontFamily:"sans-serif" }}>
-                        File is too large. Export a 1-3 minute clip as MP3 (128kbps) then re-upload for stems.
-                        <button onClick={function(){setStemStatus(null);}} style={{ marginLeft:12, background:"transparent", border:"1px solid #ffb347", borderRadius:6, padding:"4px 12px", color:"#ffb347", fontSize:11, cursor:"pointer", fontFamily:"sans-serif" }}>OK</button>
+                      <div style={{ background:"rgba(255,179,71,0.08)", border:"1px solid rgba(255,179,71,0.25)", borderRadius:10, padding:"14px 16px" }}>
+                        <div style={{ fontSize:13, color:"#ffb347", fontFamily:"sans-serif", fontWeight:700, marginBottom:6 }}>File too long for stem separation</div>
+                        <div style={{ fontSize:12, color:"#6b7280", fontFamily:"sans-serif", lineHeight:1.7, marginBottom:12 }}>
+                          Export just the specific song you want to practice as a 3–5 min MP3, then re-upload it here.<br/>
+                          <span style={{ color:"#4a5568" }}>The full recording works perfectly for the audio analyzer — stems are for practicing individual songs.</span>
+                        </div>
+                        <button onClick={function(){setStemStatus(null);}} style={{ background:"transparent", border:"1px solid rgba(255,179,71,0.4)", borderRadius:6, padding:"6px 16px", color:"#ffb347", fontSize:12, cursor:"pointer", fontFamily:"sans-serif", fontWeight:600 }}>Got it</button>
                       </div>
                     )}
                     {stemStatus === "done" && stemOutputs && (
