@@ -632,6 +632,42 @@ function detectKey(signal, sampleRate) {
   return bestKey;
 }
 
+// ── BPM DETECTION — onset autocorrelation ────────────────────────────────────
+function detectBPM(L, R, sr) {
+  var hop = 512;
+  var maxSamples = Math.min(L.length, sr * 30);
+  var start = Math.max(0, Math.floor((L.length - maxSamples) / 2));
+  var frames = Math.floor(maxSamples / hop);
+  if (frames < 10) return 120;
+  var env = new Float32Array(frames);
+  for (var i = 0; i < frames; i++) {
+    var sq = 0, off = start + i * hop;
+    for (var j = 0; j < hop && off + j < L.length; j++) {
+      var s = (L[off + j] + R[off + j]) * 0.5;
+      sq += s * s;
+    }
+    env[i] = Math.sqrt(sq / hop);
+  }
+  var onset = new Float32Array(frames);
+  for (var i = 1; i < frames; i++) {
+    var d = env[i] - env[i - 1];
+    onset[i] = d > 0 ? d : 0;
+  }
+  var fps = sr / hop;
+  var minLag = Math.max(2, Math.floor(fps * 60 / 200));
+  var maxLag = Math.floor(fps * 60 / 60);
+  var bestLag = minLag, bestCorr = -Infinity;
+  for (var lag = minLag; lag <= maxLag; lag++) {
+    var c = 0, n = frames - lag;
+    for (var i = 0; i < n; i++) c += onset[i] * onset[i + lag];
+    if (c > bestCorr) { bestCorr = c; bestLag = lag; }
+  }
+  var bpm = Math.round(fps * 60 / bestLag);
+  while (bpm < 60) bpm *= 2;
+  while (bpm > 200) bpm /= 2;
+  return bpm;
+}
+
 // ── AUDIO ANALYSIS - slices file BEFORE decoding, never loads full 2hr file ───
 async function decodeSlice(blob) {
   return new Promise(function(resolve, reject) {
@@ -715,12 +751,13 @@ async function decodeSlice(blob) {
         var mono = new Float32Array(total);
         for (var mi = 0; mi < total; mi++) mono[mi] = (L[mi] + R[mi]) * 0.5;
         var detectedKey = detectKey(mono, sr);
+        var detectedBpm = detectBPM(L, R, sr);
 
         resolve({
           lufs:lufs, peakDb:peakDb, dynRange:dynRange, stereoWidth:stereoWidth,
           duration: Math.round(total/sr), sampleRate:sr, channels:numCh,
           freq:{ sub:gb(20,80), low:gb(80,250), lowMid:gb(250,600), mid:gb(600,2500), highMid:gb(2500,7000), high:gb(7000,14000), air:gb(14000,20000) },
-          detectedKey:detectedKey,
+          detectedKey:detectedKey, bpm:detectedBpm,
         });
       } catch(err) { resolve(null); }
     };
@@ -806,6 +843,7 @@ async function measureAudio(file) {
     channels: sliceResults[0] ? sliceResults[0].channels : 2,
     fileSize: Math.round(file.size/1024),
     detectedKey: sliceResults[0] ? sliceResults[0].detectedKey : null,
+    bpm: sliceResults[0] ? sliceResults[0].bpm : null,
   };
 }
 
@@ -1439,6 +1477,9 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
   var stemMuted = stemMutedState[0]; var setStemMuted = stemMutedState[1];
   var stemPlayingState = useState(false); var stemPlaying = stemPlayingState[0]; var setStemPlaying = stemPlayingState[1];
   var stemAudioRefs = useRef({});
+  var clickMutedState = useState(true); var clickMuted = clickMutedState[0]; var setClickMuted = clickMutedState[1];
+  var clickBpmState = useState(120); var clickBpm = clickBpmState[0]; var setClickBpm = clickBpmState[1];
+  var clickRef = useRef({ ctx:null, intervalId:null, gainNode:null });
 
   var selectedMixer = showCustom && customMixer.trim()
     ? { id:"custom", name: customMixer.trim(), type:"unknown", streams:"Aux/Main Out" }
@@ -1510,6 +1551,11 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
     stemAudioRefs.current = {};
     setStemMuted({ drums:false, bass:false, vocals:false, other:false });
     setStemPlaying(false);
+    if (clickRef.current.intervalId) clearInterval(clickRef.current.intervalId);
+    if (clickRef.current.ctx) { try { clickRef.current.ctx.close(); } catch(e) {} }
+    clickRef.current = { ctx:null, intervalId:null, gainNode:null };
+    setClickMuted(true);
+    setClickBpm(120);
   };
   var prioColor = function(p) { return ({ high:"#ff5757", med:"#ffb347", ok:"#00e5a0", tip:"#4a7cff" })[p] || "#4a5568"; };
 
@@ -1562,24 +1608,81 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
     };
   }, [stemOutputs]);
 
+  useEffect(function() {
+    if (results && results.bpm) setClickBpm(results.bpm);
+  }, [results]);
+
+  var startClick = function(bpm) {
+    var ref = clickRef.current;
+    if (ref.intervalId) clearInterval(ref.intervalId);
+    if (ref.ctx) { try { ref.ctx.close(); } catch(e) {} }
+    var AudioCtxClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtxClass) return;
+    var ctx = new AudioCtxClass();
+    var gainNode = ctx.createGain();
+    gainNode.gain.value = clickMuted ? 0.0 : 1.0;
+    gainNode.connect(ctx.destination);
+    var beatDur = 60 / bpm;
+    var nextBeat = ctx.currentTime + 0.05;
+    var beatNum = 0;
+    var schedule = function() {
+      while (nextBeat < ctx.currentTime + 0.25) {
+        var osc = ctx.createOscillator();
+        var env2 = ctx.createGain();
+        osc.frequency.value = beatNum % 4 === 0 ? 1200 : 880;
+        env2.gain.setValueAtTime(0.7, nextBeat);
+        env2.gain.exponentialRampToValueAtTime(0.001, nextBeat + 0.018);
+        osc.connect(env2); env2.connect(gainNode);
+        osc.start(nextBeat); osc.stop(nextBeat + 0.02);
+        nextBeat += beatDur; beatNum++;
+      }
+    };
+    schedule();
+    var id = setInterval(schedule, 50);
+    clickRef.current = { ctx:ctx, intervalId:id, gainNode:gainNode };
+  };
+
+  var stopClick = function() {
+    var ref = clickRef.current;
+    if (ref.intervalId) clearInterval(ref.intervalId);
+    if (ref.ctx) { try { ref.ctx.close(); } catch(e) {} }
+    clickRef.current = { ctx:null, intervalId:null, gainNode:null };
+  };
+
+  var handleClickMute = function() {
+    var next = !clickMuted;
+    setClickMuted(next);
+    var ref = clickRef.current;
+    if (ref.gainNode) ref.gainNode.gain.value = next ? 0.0 : 1.0;
+  };
+
+  var handleClickBpmChange = function(delta) {
+    var next = Math.max(40, Math.min(240, clickBpm + delta));
+    setClickBpm(next);
+    if (stemPlaying) { stopClick(); startClick(next); }
+  };
+
   var handleStemPlayPause = function() {
     var refs = stemAudioRefs.current;
     var keys = Object.keys(refs);
     if (keys.length === 0) return;
     if (stemPlaying) {
       keys.forEach(function(k) { refs[k].pause(); });
+      stopClick();
       setStemPlaying(false);
     } else {
       var t = refs[keys[0]].currentTime;
       keys.forEach(function(k) { refs[k].currentTime = t; });
       var plays = keys.map(function(k) { return refs[k].play().catch(function(){}); });
       Promise.all(plays).then(function() { setStemPlaying(true); });
+      startClick(clickBpm);
     }
   };
 
   var handleStemStop = function() {
     var refs = stemAudioRefs.current;
     Object.keys(refs).forEach(function(k) { refs[k].pause(); refs[k].currentTime = 0; });
+    stopClick();
     setStemPlaying(false);
   };
 
@@ -1935,6 +2038,14 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
                       <div style={{ fontSize:9, color:"#2a3040", fontFamily:"sans-serif" }}>Estimated from audio</div>
                     </div>
                   )}
+                  {results.bpm && (
+                    <div style={{ background:"#0d1017", border:"1px solid #4a7cff33", borderRadius:12, padding:"14px" }}>
+                      <div style={{ fontSize:9, letterSpacing:2, color:"#4a5568", fontFamily:"monospace", fontWeight:700, marginBottom:6 }}>TEMPO</div>
+                      <div style={{ fontSize:17, fontWeight:900, color:"#4a7cff", letterSpacing:-0.5, marginBottom:2 }}>{results.bpm} BPM</div>
+                      <div style={{ fontSize:10, color:"#4a7cff", fontWeight:700, fontFamily:"sans-serif", marginBottom:3 }}>Beats Per Minute</div>
+                      <div style={{ fontSize:9, color:"#2a3040", fontFamily:"sans-serif" }}>Estimated from audio</div>
+                    </div>
+                  )}
                 </div>
                 <div style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:16, padding:"18px", marginBottom:18 }}>
                   <div style={{ fontSize:10, letterSpacing:3, color:"#00e5a0", fontFamily:"monospace", fontWeight:700, marginBottom:14 }}>RECOMMENDATIONS</div>
@@ -2035,6 +2146,28 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
                             );
                           })}
                         </div>
+                        {/* Click / Metronome card */}
+                        <div style={{ background: clickMuted?"#0a0c14":"rgba(10,12,20,0.9)", border:"1px solid "+(!clickMuted?"#4a7cff44":"#1a1f2e"), borderRadius:12, padding:"14px 12px", opacity: clickMuted?0.45:1, transition:"all 0.15s" }}>
+                          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+                            <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                              <span style={{ fontSize:18 }}>🎯</span>
+                              <span style={{ fontSize:12, fontWeight:700, color: clickMuted?"#4a5568":"#4a7cff", fontFamily:"sans-serif" }}>Click</span>
+                            </div>
+                            <div style={{ display:"flex", alignItems:"center", gap:4 }}>
+                              <button onClick={function(){handleClickBpmChange(-1);}}
+                                style={{ background:"#1a1f2e", border:"none", borderRadius:4, width:22, height:22, color:"#6b7280", fontSize:14, cursor:"pointer", lineHeight:"22px", textAlign:"center", padding:0 }}>-</button>
+                              <span style={{ fontSize:11, color:"#e8eaf0", fontFamily:"monospace", fontWeight:700, minWidth:30, textAlign:"center" }}>{clickBpm}</span>
+                              <button onClick={function(){handleClickBpmChange(1);}}
+                                style={{ background:"#1a1f2e", border:"none", borderRadius:4, width:22, height:22, color:"#6b7280", fontSize:14, cursor:"pointer", lineHeight:"22px", textAlign:"center", padding:0 }}>+</button>
+                            </div>
+                          </div>
+                          <div style={{ fontSize:9, color:"#2a3040", fontFamily:"sans-serif", marginBottom:8, textAlign:"center" }}>BPM — beat 1 accented</div>
+                          <button onClick={handleClickMute}
+                            style={{ width:"100%", border:"1px solid "+(clickMuted?"#2a3040":"#4a7cff55"), borderRadius:7, padding:"8px 6px", fontSize:11, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer", background: clickMuted?"transparent":"#4a7cff18", color: clickMuted?"#4a5568":"#4a7cff", transition:"all 0.15s", letterSpacing:0.5 }}>
+                            {clickMuted ? "MUTED — tap to enable" : "CLICK ON"}
+                          </button>
+                        </div>
+
                         <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
                           <button onClick={handleStemPlayPause}
                             style={{ background:"linear-gradient(135deg,#7c3aed,#a78bfa)", color:"#fff", border:"none", borderRadius:8, padding:"10px 22px", fontSize:13, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer", minWidth:108 }}>
