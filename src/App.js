@@ -437,7 +437,7 @@ function getDeviceId() {
 var TRIAL_STEM_LIMIT = 3;
 var TRIAL_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
 var TRIAL_MAX_SECONDS = 120; // 2 minutes
-var MINS_PER_STEM_CREDIT = 5; // 1 credit per 5 minutes of audio
+var MINS_PER_STEM_CREDIT = 15; // 1 credit per 15 minutes of audio
 
 function calcStemCredits(durationSecs) {
   if (!durationSecs || durationSecs <= 0) return 1;
