@@ -2537,7 +2537,7 @@ function SampleScoreCard() {
       {bars.map(function(b,i) {
         return (
           <div key={i} style={{ marginBottom:12 }}>
-            <div style={{ display:"flex", justifyContent:"space-between", marginBottom:5 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", flexWrap:"wrap", gap:"2px 8px", marginBottom:5 }}>
               <span style={{ fontSize:12, fontFamily:"sans-serif", fontWeight:600, color:"#e8eaf0" }}>{b.label}</span>
               <span style={{ fontSize:11, fontFamily:"sans-serif", color:"#6b7280" }}>{b.note}</span>
             </div>
@@ -2582,7 +2582,7 @@ function HomePage({ navigate, isPro, onUnlockClick }) {
     <div style={{ background:"#07090f", minHeight:"100vh", color:"#e8eaf0", fontFamily:"Georgia,serif" }}>
 
       {/* ── HERO ── */}
-      <section style={{ minHeight:"100vh", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"120px 20px 80px", textAlign:"center", position:"relative", overflow:"hidden" }}>
+      <section style={{ minHeight:"100vh", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"clamp(70px,12vh,120px) 20px clamp(50px,8vh,80px)", textAlign:"center", position:"relative", overflow:"hidden" }}>
         <div style={{ position:"absolute", top:"20%", left:"50%", transform:"translateX(-50%)", width:700, height:500, background:"radial-gradient(ellipse,rgba(0,229,160,0.06) 0%,transparent 70%)", pointerEvents:"none" }} />
         <div style={{ display:"inline-flex", alignItems:"center", gap:8, background:"rgba(0,229,160,0.08)", border:"1px solid rgba(0,229,160,0.2)", borderRadius:999, padding:"6px 16px", marginBottom:28, animation:"float 3s ease-in-out infinite" }}>
           <div style={{ width:6, height:6, borderRadius:"50%", background:"#00e5a0" }} />
