@@ -599,7 +599,7 @@ function ProUnlockModal({ onClose, onUnlock }) {
             <div style={{ fontSize:13, color:"#6b7280", fontFamily:"sans-serif", lineHeight:1.6, marginBottom:24 }}>Check your email after payment for your access code.</div>
             <input value={code} onChange={function(e) { setCode(e.target.value.toUpperCase()); setError(""); }}
               onKeyDown={function(e) { if(e.key === "Enter") submit(); }}
-              placeholder="e.g. GMPRO2026"
+              placeholder="Enter your access code"
               disabled={loading}
               style={{ width:"100%", background:"#060810", border:"1px solid " + (error ? "#ff5757" : "#1a1f2e"), borderRadius:10, padding:"14px 16px", color:"#e8eaf0", fontSize:15, fontFamily:"monospace", fontWeight:700, letterSpacing:2, outline:"none", marginBottom:error ? 8 : 16, textTransform:"uppercase", opacity: loading ? 0.5 : 1 }}
             />
