@@ -1591,6 +1591,7 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
   var stemMuted = stemMutedState[0]; var setStemMuted = stemMutedState[1];
   var stemVolumesState = useState({ drums:1, bass:1, vocals:1, other:1 });
   var stemVolumes = stemVolumesState[0]; var setStemVolumes = stemVolumesState[1];
+  var stemSliceMinsState = useState(null); var stemSliceMins = stemSliceMinsState[0]; var setStemSliceMins = stemSliceMinsState[1];
   var stemPlayingState = useState(false); var stemPlaying = stemPlayingState[0]; var setStemPlaying = stemPlayingState[1];
   var stemAudioRefs = useRef({});
   var stemsBalanceState = useState(null); var stemsBalance = stemsBalanceState[0]; var setStemsBalance = stemsBalanceState[1];
@@ -1687,26 +1688,24 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
       setStemError("You've used all " + TRIAL_STEM_LIMIT + " trial stem separations. Unlimited access starts when your trial converts to a paid subscription.");
       setStemStatus("error"); return;
     }
-    // 3MB keeps the JSON body under Vercel's 4.5MB limit after base64 encoding
-    var MAX_STEM_BYTES = 3 * 1024 * 1024;
-    if (!trial.isTrial && file.size > MAX_STEM_BYTES) {
-      setStemStatus("toolarge"); return;
-    }
-    // Credits: 1 per 5 min of audio (trial always 1 since we byte-slice)
+    // Slice limit: 3MB keeps base64 JSON body under Vercel's 4.5MB function limit.
+    // We NEVER block — just take the first 3MB of any file. At 128kbps that's ~3 min;
+    // at 64–96kbps (common live recordings) it's 4–6 min. Good enough to practice a song.
+    var STEM_BYTE_LIMIT = 3 * 1024 * 1024;
+    // Credits: 1 per 15 min of original audio (trial always 1 since we byte-slice)
     var durSecs = results && results.duration ? results.duration : 0;
     var creditsNeeded = trial.isTrial ? 1 : calcStemCredits(durSecs);
+    // Estimate how many minutes the slice covers so we can show the user
+    var estimatedBytesPerSec = (file.size > 0 && durSecs > 0) ? (file.size / durSecs) : 16000;
+    var sliceSecs = Math.round(Math.min(file.size, STEM_BYTE_LIMIT) / estimatedBytesPerSec);
     setStemStatus("loading"); setStemOutputs(null); setStemError("");
+    setStemSliceMins(sliceSecs < durSecs - 30 ? Math.max(1, Math.round(sliceSecs / 60)) : null);
     var errMsg = "";
     try {
       var dataUrl;
-      if (trial.isTrial) {
-        // Byte-slice to 3MB (≈3 min of 128kbps MP3/AAC, stays under Vercel body limit)
-        var TRIAL_BYTE_LIMIT = 3 * 1024 * 1024;
-        var trialBlob = file.size > TRIAL_BYTE_LIMIT ? file.slice(0, TRIAL_BYTE_LIMIT) : file;
-        dataUrl = await readFileAsDataURL(trialBlob);
-      } else {
-        dataUrl = await readFileAsDataURL(file);
-      }
+      // Byte-slice for everyone — trial and paid — stays within Vercel body limit
+      var stemBlob = file.size > STEM_BYTE_LIMIT ? file.slice(0, STEM_BYTE_LIMIT) : file;
+      dataUrl = await readFileAsDataURL(stemBlob);
       var resp = await fetch("/api/stems", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2294,16 +2293,6 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
                                 Buy 10 more stems — $2.99
                               </button>
                             </div>
-                          ) : !trial.isTrial && file && file.size > 3*1024*1024 ? (
-                            <div style={{ fontSize:12, color:"#ffb347", fontFamily:"sans-serif" }}>
-                              <div>
-                                <div style={{ fontSize:13, color:"#ffb347", fontFamily:"sans-serif", fontWeight:700, marginBottom:6 }}>File too long for stem separation</div>
-                                <div style={{ fontSize:12, color:"#6b7280", fontFamily:"sans-serif", lineHeight:1.7 }}>
-                                  Export just the specific song you want to practice (3–5 min MP3) and re-upload it here.<br/>
-                                  <span style={{ color:"#4a5568" }}>Tip: the full-length recording already works perfectly for the audio analyzer above.</span>
-                                </div>
-                              </div>
-                            </div>
                           ) : (
                             <div style={{ display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
                               <button onClick={handleStemSeparation} disabled={trial.isTrial && trial.stemsLeft <= 0}
@@ -2325,18 +2314,10 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
                         <div style={{ width:22, height:22, border:"2px solid #2a2040", borderTop:"2px solid #a78bfa", borderRadius:"50%", animation:"spin 0.8s linear infinite", flexShrink:0 }} />
                         <div>
                           <div style={{ fontSize:13, color:"#e8eaf0", fontFamily:"sans-serif", fontWeight:600 }}>Separating stems...</div>
-                          <div style={{ fontSize:11, color:"#4a5568", fontFamily:"sans-serif", marginTop:3 }}>This takes 1-4 minutes. Stay on this page.</div>
+                          <div style={{ fontSize:11, color:"#4a5568", fontFamily:"sans-serif", marginTop:3 }}>
+                            {stemSliceMins ? "Processing first ~" + stemSliceMins + " min of your recording. " : ""}This takes 1-4 minutes. Stay on this page.
+                          </div>
                         </div>
-                      </div>
-                    )}
-                    {stemStatus === "toolarge" && (
-                      <div style={{ background:"rgba(255,179,71,0.08)", border:"1px solid rgba(255,179,71,0.25)", borderRadius:10, padding:"14px 16px" }}>
-                        <div style={{ fontSize:13, color:"#ffb347", fontFamily:"sans-serif", fontWeight:700, marginBottom:6 }}>File too long for stem separation</div>
-                        <div style={{ fontSize:12, color:"#6b7280", fontFamily:"sans-serif", lineHeight:1.7, marginBottom:12 }}>
-                          Export just the specific song you want to practice as a 3–5 min MP3, then re-upload it here.<br/>
-                          <span style={{ color:"#4a5568" }}>The full recording works perfectly for the audio analyzer — stems are for practicing individual songs.</span>
-                        </div>
-                        <button onClick={function(){setStemStatus(null);}} style={{ background:"transparent", border:"1px solid rgba(255,179,71,0.4)", borderRadius:6, padding:"6px 16px", color:"#ffb347", fontSize:12, cursor:"pointer", fontFamily:"sans-serif", fontWeight:600 }}>Got it</button>
                       </div>
                     )}
                     {stemStatus === "done" && stemOutputs && (
@@ -2426,7 +2407,7 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
                               ■  Stop
                             </button>
                           )}
-                          <button onClick={function(){handleStemStop();setStemStatus(null);setStemOutputs(null);setStemMuted({drums:false,bass:false,vocals:false,other:false});setStemVolumes({drums:1,bass:1,vocals:1,other:1});}}
+                          <button onClick={function(){handleStemStop();setStemStatus(null);setStemOutputs(null);setStemMuted({drums:false,bass:false,vocals:false,other:false});setStemVolumes({drums:1,bass:1,vocals:1,other:1});setStemSliceMins(null);}}
                             style={{ background:"transparent", border:"1px solid #1a1f2e", borderRadius:6, padding:"5px 12px", color:"#4a5568", fontSize:11, cursor:"pointer", fontFamily:"sans-serif", marginLeft:"auto" }}>
                             Separate Another
                           </button>
