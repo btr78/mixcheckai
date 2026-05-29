@@ -2387,6 +2387,61 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
                     </div>
                   </div>
                 )}
+                {/* ── Below-stem upsell for Pro users on trial or running low ── */}
+                {isPro && (function() {
+                  var trial = getTrialInfo();
+                  var bal = stemsBalance;
+                  if (bal && bal.isLifetime) return null;
+                  var monthlyLeft = bal ? Math.max(0, bal.monthly_limit - bal.monthly_used) : null;
+                  var totalLeft = bal ? (monthlyLeft + (bal.credits || 0)) : null;
+                  var showOffer = trial.isTrial || (totalLeft !== null && totalLeft <= 5);
+                  if (!showOffer) return null;
+                  return (
+                    <div style={{ background:"linear-gradient(135deg,rgba(124,58,237,0.1),rgba(167,139,250,0.04))", border:"1px solid rgba(167,139,250,0.25)", borderRadius:14, padding:"18px", marginBottom:18 }}>
+                      <div style={{ fontSize:10, letterSpacing:3, color:"#a78bfa", fontFamily:"monospace", fontWeight:700, marginBottom:8 }}>STEM CREDITS</div>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:12 }}>
+                        <div>
+                          <div style={{ fontSize:13, fontWeight:700, color:"#e8eaf0", fontFamily:"sans-serif", marginBottom:4 }}>
+                            {trial.isTrial ? "Trial includes 3 stem separations" : "Running low on stems"}
+                          </div>
+                          <div style={{ fontSize:12, color:"#6b7280", fontFamily:"sans-serif" }}>
+                            {trial.isTrial
+                              ? "Need more songs? Top up with 10 extra stems for $2.99 CAD."
+                              : (totalLeft || 0) + " separations left — top up with 10 more for $2.99 CAD."}
+                          </div>
+                        </div>
+                        <button onClick={function() { window.open(STRIPE_CREDITS_LINK, "_blank"); }}
+                          style={{ background:"linear-gradient(135deg,#7c3aed,#a78bfa)", color:"#fff", border:"none", borderRadius:8, padding:"10px 20px", fontSize:12, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}>
+                          Buy 10 credits — $2.99
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* ── Below-stem upsell for non-Pro users ── */}
+                {!isPro && (
+                  <div style={{ background:"linear-gradient(135deg,rgba(0,229,160,0.08),rgba(0,229,160,0.02))", border:"1px solid rgba(0,229,160,0.25)", borderRadius:14, padding:"20px", marginBottom:18 }}>
+                    <div style={{ fontSize:10, letterSpacing:3, color:"#00e5a0", fontFamily:"monospace", fontWeight:700, marginBottom:10 }}>UNLOCK FULL ACCESS</div>
+                    <div style={{ fontSize:14, fontWeight:700, color:"#e8eaf0", fontFamily:"sans-serif", marginBottom:6 }}>
+                      Stem Separation + Unlimited Uploads + PDF Reports
+                    </div>
+                    <div style={{ fontSize:12, color:"#6b7280", fontFamily:"sans-serif", marginBottom:16, lineHeight:1.6 }}>
+                      Split any recording into drums, bass, vocals and instruments. Includes 10 stem separations per month.
+                    </div>
+                    <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+                      <button onClick={function() { window.open(STRIPE_PAYMENT_LINK, "_blank"); }}
+                        style={{ background:"linear-gradient(135deg,#00e5a0,#00c080)", color:"#07090f", border:"none", borderRadius:8, padding:"11px 22px", fontSize:13, fontFamily:"sans-serif", fontWeight:800, cursor:"pointer", whiteSpace:"nowrap" }}>
+                        Start 7-Day Free Trial
+                      </button>
+                      <button onClick={function() { window.open(STRIPE_PAYMENT_LINK_NOTRIAL, "_blank"); }}
+                        style={{ background:"transparent", border:"1px solid rgba(0,229,160,0.3)", borderRadius:8, padding:"10px 18px", fontSize:12, fontFamily:"sans-serif", fontWeight:600, color:"#00e5a0", cursor:"pointer", whiteSpace:"nowrap" }}>
+                        Skip trial — pay today
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {!isPro && (
                   <div style={{ background:"linear-gradient(135deg,rgba(0,229,160,0.07),rgba(0,229,160,0.02))", border:"1px solid rgba(0,229,160,0.25)", borderRadius:14, padding:"18px", marginBottom:20 }}>
                     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:12 }}>
