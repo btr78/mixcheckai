@@ -662,7 +662,7 @@ function Nav({ navigate, page, isPro, onUnlockClick, appMode, setAppMode }) {
           )}
         </div>
       </div>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&display=swap'); * { box-sizing:border-box; } @keyframes wave { from{transform:scaleY(0.35)} to{transform:scaleY(1)} } @keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-7px)} } @keyframes fadein { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} } @keyframes spin { to{transform:rotate(360deg)} } @keyframes glow { 0%,100%{box-shadow:0 0 20px rgba(0,229,160,0.15)} 50%{box-shadow:0 0 40px rgba(0,229,160,0.35)} } html { scroll-behavior:smooth; }`}</style>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&display=swap'); * { box-sizing:border-box; } @keyframes wave { from{transform:scaleY(0.35)} to{transform:scaleY(1)} } @keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-7px)} } @keyframes fadein { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} } @keyframes spin { to{transform:rotate(360deg)} } @keyframes glow { 0%,100%{box-shadow:0 0 20px rgba(0,229,160,0.15)} 50%{box-shadow:0 0 40px rgba(0,229,160,0.35)} } html { scroll-behavior:smooth; } .stem-fader{-webkit-appearance:none;appearance:none;width:100%;height:3px;border-radius:2px;outline:none;cursor:pointer;border:none;padding:0;} .stem-fader::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:var(--fc,#a78bfa);border:2px solid #07090f;cursor:grab;box-shadow:0 1px 6px rgba(0,0,0,0.6);transition:transform 0.08s,box-shadow 0.08s;} .stem-fader:active::-webkit-slider-thumb{cursor:grabbing;transform:scale(1.3);box-shadow:0 0 0 4px color-mix(in srgb,var(--fc,#a78bfa) 25%,transparent),0 2px 10px rgba(0,0,0,0.7);} .stem-fader::-moz-range-thumb{width:16px;height:16px;border-radius:50%;background:var(--fc,#a78bfa);border:2px solid #07090f;cursor:grab;box-shadow:0 1px 6px rgba(0,0,0,0.6);} .stem-fader::-moz-range-track{height:3px;background:transparent;border:none;} .stem-fader:focus{outline:none;}`}</style>
     </nav>
   );
 }
@@ -1582,6 +1582,8 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
   var stemErrorState = useState(""); var stemError = stemErrorState[0]; var setStemError = stemErrorState[1];
   var stemMutedState = useState({ drums:false, bass:false, vocals:false, other:false });
   var stemMuted = stemMutedState[0]; var setStemMuted = stemMutedState[1];
+  var stemVolumesState = useState({ drums:1, bass:1, vocals:1, other:1 });
+  var stemVolumes = stemVolumesState[0]; var setStemVolumes = stemVolumesState[1];
   var stemPlayingState = useState(false); var stemPlaying = stemPlayingState[0]; var setStemPlaying = stemPlayingState[1];
   var stemAudioRefs = useRef({});
   var stemsBalanceState = useState(null); var stemsBalance = stemsBalanceState[0]; var setStemsBalance = stemsBalanceState[1];
@@ -1832,6 +1834,11 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
     next[key] = !next[key];
     a.muted = next[key];
     setStemMuted(next);
+  };
+  var handleStemVolume = function(key, val) {
+    var a = stemAudioRefs.current[key];
+    if (a) a.volume = val;
+    setStemVolumes(function(prev) { var n = Object.assign({}, prev); n[key] = val; return n; });
   };
 
   return (
@@ -2322,6 +2329,26 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
                                   style={{ width:"100%", border:"1px solid "+(isMuted?"#2a3040":col+"55"), borderRadius:7, padding:"8px 6px", fontSize:11, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer", background: isMuted?"transparent":col+"18", color: isMuted?"#4a5568":col, transition:"all 0.15s", letterSpacing:0.5 }}>
                                   {isMuted ? "MUTED — tap to unmute" : "MUTE"}
                                 </button>
+                                {/* Volume fader */}
+                                <div style={{ marginTop:10, opacity: isMuted ? 0.3 : 1, transition:"opacity 0.15s" }}>
+                                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:5 }}>
+                                    <span style={{ fontSize:9, color: col, fontFamily:"monospace", fontWeight:700, letterSpacing:2 }}>VOL</span>
+                                    <span style={{ fontSize:9, color:"#4a5568", fontFamily:"monospace", fontWeight:600 }}>
+                                      {Math.round((stemVolumes[k] !== undefined ? stemVolumes[k] : 1) * 100)}%
+                                    </span>
+                                  </div>
+                                  <input
+                                    type="range" className="stem-fader"
+                                    min="0" max="1" step="0.01"
+                                    value={stemVolumes[k] !== undefined ? stemVolumes[k] : 1}
+                                    onInput={function(e) { handleStemVolume(k, parseFloat(e.target.value)); }}
+                                    onChange={function(e) { handleStemVolume(k, parseFloat(e.target.value)); }}
+                                    style={{
+                                      "--fc": col,
+                                      background: "linear-gradient(to right," + col + " " + Math.round((stemVolumes[k]||1)*100) + "%,#1a1f2e " + Math.round((stemVolumes[k]||1)*100) + "%)",
+                                    }}
+                                  />
+                                </div>
                               </div>
                             );
                           })}
@@ -2359,7 +2386,7 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
                               ■  Stop
                             </button>
                           )}
-                          <button onClick={function(){handleStemStop();setStemStatus(null);setStemOutputs(null);setStemMuted({drums:false,bass:false,vocals:false,other:false});}}
+                          <button onClick={function(){handleStemStop();setStemStatus(null);setStemOutputs(null);setStemMuted({drums:false,bass:false,vocals:false,other:false});setStemVolumes({drums:1,bass:1,vocals:1,other:1});}}
                             style={{ background:"transparent", border:"1px solid #1a1f2e", borderRadius:6, padding:"5px 12px", color:"#4a5568", fontSize:11, cursor:"pointer", fontFamily:"sans-serif", marginLeft:"auto" }}>
                             Separate Another
                           </button>
