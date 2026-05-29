@@ -1685,16 +1685,10 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
     try {
       var dataUrl;
       if (trial.isTrial) {
-        // Truncate to 2 minutes for trial users
-        var ab = await readBlobAsArrayBuffer(file);
-        var tmpCtx = new (window.AudioContext || window.webkitAudioContext)();
-        var decoded = await decodeAudioDataSafe(tmpCtx, ab);
-        var maxSamples = Math.min(decoded.length, TRIAL_MAX_SECONDS * decoded.sampleRate);
-        var numCh = Math.min(decoded.numberOfChannels, 2);
-        var truncBuf = tmpCtx.createBuffer(numCh, maxSamples, decoded.sampleRate);
-        tmpCtx.close().catch(function(){});
-        for (var ch = 0; ch < numCh; ch++) truncBuf.getChannelData(ch).set(decoded.getChannelData(ch).subarray(0, maxSamples));
-        dataUrl = wavToBase64DataUrl(encodeWAV(truncBuf));
+        // Byte-slice to ~4MB (≈3 min of 128kbps MP3/AAC) — avoids AudioContext on iOS Safari
+        var TRIAL_BYTE_LIMIT = 4 * 1024 * 1024;
+        var trialBlob = file.size > TRIAL_BYTE_LIMIT ? file.slice(0, TRIAL_BYTE_LIMIT) : file;
+        dataUrl = await readFileAsDataURL(trialBlob);
       } else {
         dataUrl = await readFileAsDataURL(file);
       }
