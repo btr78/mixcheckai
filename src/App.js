@@ -878,7 +878,8 @@ function average(arr) {
 
 async function measureAudio(file) {
   var sizeMB = file.size / (1024*1024);
-  var isLarge = sizeMB > 25; // Over 25MB use slice approach
+  // Above 4MB (~4 min of 128kbps MP3) decode slices to avoid iOS Safari memory limits
+  var isLarge = sizeMB > 4;
 
   var sliceResults = [];
   var sliceCount = 1;
@@ -887,14 +888,14 @@ async function measureAudio(file) {
   if (!isLarge) {
     // Small file - decode whole thing at once
     var result = await decodeSlice(file);
-    if (!result) throw new Error("Cannot decode audio. Try MP3 or WAV.");
+    if (!result) throw new Error("Cannot decode audio. Try exporting as MP3 or WAV.");
     sliceResults = [result];
   } else {
     // Large file - read 3 byte slices BEFORE decoding
-    // This means we NEVER load more than ~5MB into RAM at once
+    // 3MB max per slice keeps iOS Safari memory usage under ~65MB per decode
     isLongFile = true;
     sliceCount = 3;
-    var sliceSize = Math.min(5*1024*1024, Math.floor(file.size/5)); // 5MB per slice max
+    var sliceSize = Math.min(3*1024*1024, Math.floor(file.size/5)); // 3MB per slice max
     var positions = [
       0,
       Math.floor(file.size/2 - sliceSize/2),
@@ -907,7 +908,7 @@ async function measureAudio(file) {
       var res = await decodeSlice(blob);
       if (res) sliceResults.push(res);
     }
-    if (sliceResults.length === 0) throw new Error("Cannot decode audio. Try exporting as MP3 or WAV.");
+    if (sliceResults.length === 0) throw new Error("Cannot decode audio. Make sure the file is MP3 or WAV — other formats may not be supported on mobile.");
   }
 
   // Average all slice measurements
@@ -1641,7 +1642,11 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
       setResults(finalR);
       setStep(4);
     } catch(err) {
-      setResults({ error: (err && err.message) ? err.message : "Could not analyze. Try an MP3 or WAV file." });
+      var errText = (err && err.message) ? err.message : "Could not analyze. Try an MP3 or WAV file.";
+      if (errText.indexOf("expected pattern") !== -1 || errText.indexOf("Unable to decode") !== -1) {
+        errText = "Could not decode audio on this device. Try a shorter clip (under 5 min) exported as MP3.";
+      }
+      setResults({ error: errText });
       setStep(4);
     }
     setAnalyzing(false); setAnalyzeStatus("");
@@ -1715,7 +1720,13 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
       }
       errMsg = "Timed out — try a shorter file (under 3 min)";
       throw new Error(errMsg);
-    } catch (e) { setStemError(errMsg || e.message || "Unknown error"); setStemStatus("error"); }
+    } catch (e) {
+      var msg = errMsg || e.message || "Unknown error";
+      if (!errMsg && (msg.indexOf("expected pattern") !== -1 || msg.indexOf("EncodingError") !== -1 || msg.indexOf("Unable to decode") !== -1)) {
+        msg = "Could not read audio file on this device. Export a 1-3 minute clip as MP3 and try again.";
+      }
+      setStemError(msg); setStemStatus("error");
+    }
   }, [file]);
 
   useEffect(function() {
