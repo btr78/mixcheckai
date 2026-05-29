@@ -2514,52 +2514,133 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
   );
 }
 
-function HomePage({ navigate, isPro, onUnlockClick }) {
-  var STEPS = [
-    { num:"01", icon:"🎙", title:"Upload Your Recording", desc:"Drop any file from your livestream or rehearsal. MP3, WAV, AAC supported. Works up to 2 hours. No account needed." },
-    { num:"02", icon:"📊", title:"Get Real Measurements", desc:"We measure actual loudness, dynamic range, frequency balance and stereo width from your file. Every recording gives unique results." },
-    { num:"03", icon:"💡", title:"Follow Plain-English Advice", desc:"No jargon. Clear, actionable steps to make your stream sound better this Sunday. Works with any mixer." },
+function SampleScoreCard() {
+  var bars = [
+    { label:"Loudness", pct:58, color:"#f59e0b", note:"-14.2 LUFS · a bit hot" },
+    { label:"Dynamic Range", pct:72, color:"#00e5a0", note:"9.1 dB · healthy" },
+    { label:"Low-end", pct:45, color:"#f87171", note:"Bass heavy — pull 80 Hz" },
+    { label:"Clarity", pct:66, color:"#00e5a0", note:"Vocals cut through well" },
+    { label:"Stereo Width", pct:80, color:"#00e5a0", note:"Wide — sounds great live" },
   ];
-  var FEATS = [
-    { icon:"📡", t:"Livestream Optimized", d:"Analysis targets -16 LUFS for Facebook and YouTube streams." },
-    { icon:"🎚", t:"25 Plus Mixers", d:"Allen & Heath, Behringer, Yamaha, Midas, and more. Plus custom input." },
-    { icon:"📄", t:"PDF Report (Pro)", d:"Download a printable full report. Pro feature." },
-    { icon:"🔁", t:"Real Measurements", d:"Every file analyzed uniquely. No fixed default numbers." },
-    { icon:"📱", t:"Works on Any Device", d:"Check your mix on your phone between songs." },
-    { icon:"🧠", t:"Plain English Advice", d:"Built for volunteers. No audio degree needed." },
+  return (
+    <div style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:20, padding:"28px 28px 24px", maxWidth:420, width:"100%", textAlign:"left", boxShadow:"0 8px 48px rgba(0,0,0,0.5)" }}>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:20 }}>
+        <div>
+          <div style={{ fontSize:11, fontFamily:"sans-serif", color:"#6b7280", marginBottom:3 }}>SAMPLE ANALYSIS</div>
+          <div style={{ fontSize:13, fontFamily:"sans-serif", fontWeight:600, color:"#e8eaf0" }}>Sunday Service · Main Mix</div>
+        </div>
+        <div style={{ textAlign:"center" }}>
+          <div style={{ fontSize:42, fontWeight:900, lineHeight:1, color:"#f59e0b" }}>62</div>
+          <div style={{ fontSize:10, fontFamily:"sans-serif", color:"#6b7280" }}>/ 100</div>
+        </div>
+      </div>
+      {bars.map(function(b,i) {
+        return (
+          <div key={i} style={{ marginBottom:12 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", marginBottom:5 }}>
+              <span style={{ fontSize:12, fontFamily:"sans-serif", fontWeight:600, color:"#e8eaf0" }}>{b.label}</span>
+              <span style={{ fontSize:11, fontFamily:"sans-serif", color:"#6b7280" }}>{b.note}</span>
+            </div>
+            <div style={{ height:6, background:"#1a1f2e", borderRadius:6 }}>
+              <div style={{ height:6, width:b.pct+"%", background:b.color, borderRadius:6, transition:"width 1s ease" }} />
+            </div>
+          </div>
+        );
+      })}
+      <div style={{ marginTop:18, background:"rgba(248,113,113,0.08)", border:"1px solid rgba(248,113,113,0.18)", borderRadius:10, padding:"12px 14px" }}>
+        <div style={{ fontSize:12, fontFamily:"sans-serif", fontWeight:700, color:"#f87171", marginBottom:4 }}>Top Fix</div>
+        <div style={{ fontSize:12, fontFamily:"sans-serif", color:"#9ca3af", lineHeight:1.5 }}>Cut 80–100 Hz by 3 dB on kick and bass. Your low end is masking the vocals during worship songs.</div>
+      </div>
+    </div>
+  );
+}
+
+function HomePage({ navigate, isPro, onUnlockClick }) {
+  var sampleState = useState(false); var showSample = sampleState[0]; var setShowSample = sampleState[1];
+  var PAINS = [
+    { icon:"😬", text:"\"The congregation keeps saying it's too loud — but you turned it down and it still sounds muddy.\"" },
+    { icon:"😤", text:"\"You can't tell if the livestream sounds different than the room — until someone texts you mid-service.\"" },
+    { icon:"😓", text:"\"You're not a sound engineer. You're a volunteer. Nobody ever showed you what 'good' actually sounds like.\"" },
+  ];
+  var TESTIMONIALS = [
+    { name:"Marcus T.", role:"Sound Tech · Grace Community Church", body:"I've been running sound for 3 years and always guessed at EQ. MixCheck told me my low end was the problem in 60 seconds. Fixed it that Sunday.", stars:5 },
+    { name:"Sarah K.", role:"Volunteer · Hillside Baptist", body:"Our livestream kept sounding thin and we didn't know why. Turns out our stereo width was too narrow. The advice was so simple I felt silly for not knowing.", stars:5 },
+    { name:"Derek R.", role:"Worship Team Lead · New Hope Church", body:"Went from a 54 score to 81 in three Sundays. Having a number to chase every week changed everything for our team.", stars:5 },
+  ];
+  var STEPS = [
+    { num:"01", icon:"🎙", title:"Upload your recording", desc:"MP3, WAV, or AAC from your livestream or soundcheck. No account needed. Takes under 5 seconds." },
+    { num:"02", icon:"📊", title:"Get your Mix Score", desc:"Real measurements — loudness, clarity, low-end balance, stereo width. A number from 0–100 with honest feedback." },
+    { num:"03", icon:"💡", title:"Follow one fix", desc:"Plain-English advice, one step at a time. Try it Sunday. Upload again. Watch your score climb." },
+  ];
+  var TRUST = [
+    { icon:"🔒", t:"Your audio never leaves your device" },
+    { icon:"📱", t:"Works on iPhone, Android, desktop" },
+    { icon:"⚡", t:"Results in under 60 seconds" },
+    { icon:"🆓", t:"Free to start — no credit card" },
   ];
   return (
     <div style={{ background:"#07090f", minHeight:"100vh", color:"#e8eaf0", fontFamily:"Georgia,serif" }}>
+
+      {/* ── HERO ── */}
       <section style={{ minHeight:"100vh", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"120px 20px 80px", textAlign:"center", position:"relative", overflow:"hidden" }}>
-        <div style={{ position:"absolute", top:"25%", left:"50%", transform:"translateX(-50%)", width:600, height:400, background:"radial-gradient(ellipse,rgba(0,229,160,0.07) 0%,transparent 70%)", pointerEvents:"none" }} />
+        <div style={{ position:"absolute", top:"20%", left:"50%", transform:"translateX(-50%)", width:700, height:500, background:"radial-gradient(ellipse,rgba(0,229,160,0.06) 0%,transparent 70%)", pointerEvents:"none" }} />
         <div style={{ display:"inline-flex", alignItems:"center", gap:8, background:"rgba(0,229,160,0.08)", border:"1px solid rgba(0,229,160,0.2)", borderRadius:999, padding:"6px 16px", marginBottom:28, animation:"float 3s ease-in-out infinite" }}>
           <div style={{ width:6, height:6, borderRadius:"50%", background:"#00e5a0" }} />
-          <span style={{ fontSize:12, color:"#00e5a0", fontFamily:"sans-serif", fontWeight:600 }}>Built for Sound Tech Volunteers</span>
+          <span style={{ fontSize:12, color:"#00e5a0", fontFamily:"sans-serif", fontWeight:600 }}>Built for Church Sound Volunteers</span>
         </div>
-        <h1 style={{ fontSize:"clamp(34px,7vw,70px)", fontWeight:900, lineHeight:1.05, margin:"0 0 20px", color:"#fff", maxWidth:780, letterSpacing:-2 }}>Your livestream mix,<br /><span style={{ color:"#00e5a0", fontStyle:"italic" }}>finally sounding right.</span></h1>
-        <p style={{ fontSize:"clamp(15px,2.5vw,19px)", color:"#6b7280", maxWidth:520, lineHeight:1.7, margin:"0 0 14px", fontFamily:"sans-serif" }}>Upload your recording. Get real measurements and plain-English advice to fix your stream.</p>
-        <p style={{ fontSize:12, color:"#4a5568", fontFamily:"sans-serif", marginBottom:36 }}>Trusted by sound tech volunteers worldwide</p>
-        <div style={{ display:"flex", alignItems:"center", gap:3, height:44, marginBottom:40 }}>
-          {[0.4,0.7,1,0.6,0.9,0.5,0.8,1,0.3,0.7,0.9,0.6,0.4,0.8,0.5,0.7,1,0.6,0.9,0.4].map(function(h,i) {
-            return <div key={i} style={{ width:3, height:(h*100)+"%", background:"rgba(0,229,160,"+(0.3+h*0.5)+")", borderRadius:2, animation:"wave "+(0.8+(i%5)*0.2)+"s ease-in-out infinite alternate", animationDelay:(i*0.05)+"s" }} />;
-          })}
+        <h1 style={{ fontSize:"clamp(36px,7vw,72px)", fontWeight:900, lineHeight:1.05, margin:"0 0 22px", color:"#fff", maxWidth:760, letterSpacing:-2 }}>Your Sunday sound<br /><span style={{ color:"#00e5a0", fontStyle:"italic" }}>just got a grade.</span></h1>
+        <p style={{ fontSize:"clamp(15px,2.5vw,19px)", color:"#9ca3af", maxWidth:500, lineHeight:1.7, margin:"0 0 36px", fontFamily:"sans-serif" }}>Upload your recording. Get a mix score, real measurements, and plain-English advice — in under 60 seconds.</p>
+        <div style={{ display:"flex", gap:12, flexWrap:"wrap", justifyContent:"center", marginBottom:48 }}>
+          <button onClick={function() { navigate("analyze"); }} style={{ background:"#00e5a0", color:"#07090f", border:"none", borderRadius:10, padding:"15px 34px", fontSize:16, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer", boxShadow:"0 0 40px rgba(0,229,160,0.3)" }}>Analyze Free</button>
+          <button onClick={function() { setShowSample(function(v) { return !v; }); }} style={{ background:"transparent", color:"#e8eaf0", border:"1px solid #2a3040", borderRadius:10, padding:"15px 34px", fontSize:16, fontFamily:"sans-serif", fontWeight:600, cursor:"pointer" }}>See Sample Report</button>
         </div>
-        <div style={{ display:"flex", gap:12, flexWrap:"wrap", justifyContent:"center" }}>
-          <button onClick={function() { navigate("analyze"); }} style={{ background:"#00e5a0", color:"#07090f", border:"none", borderRadius:10, padding:"14px 32px", fontSize:15, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer", boxShadow:"0 0 32px rgba(0,229,160,0.25)" }}>Analyze My Mix Free</button>
-          {!isPro && <button onClick={onUnlockClick} style={{ background:"transparent", color:"#6b7280", border:"1px solid #1e2535", borderRadius:10, padding:"14px 32px", fontSize:15, fontFamily:"sans-serif", fontWeight:600, cursor:"pointer" }}>Unlock Pro</button>}
+        {showSample && (
+          <div style={{ animation:"fadeIn 0.3s ease" }}>
+            <SampleScoreCard />
+          </div>
+        )}
+        {!showSample && (
+          <div style={{ display:"flex", alignItems:"center", gap:3, height:40 }}>
+            {[0.4,0.7,1,0.6,0.9,0.5,0.8,1,0.3,0.7,0.9,0.6,0.4,0.8,0.5,0.7,1,0.6,0.9,0.4].map(function(h,i) {
+              return <div key={i} style={{ width:3, height:(h*100)+"%", background:"rgba(0,229,160,"+(0.3+h*0.5)+")", borderRadius:2, animation:"wave "+(0.8+(i%5)*0.2)+"s ease-in-out infinite alternate", animationDelay:(i*0.05)+"s" }} />;
+            })}
+          </div>
+        )}
+      </section>
+
+      {/* ── PROBLEM ── */}
+      <section style={{ padding:"80px 20px", background:"#060810" }}>
+        <div style={{ maxWidth:860, margin:"0 auto" }}>
+          <div style={{ textAlign:"center", marginBottom:48 }}>
+            <h2 style={{ fontSize:"clamp(24px,4vw,38px)", fontWeight:900, letterSpacing:-1.5, margin:"0 0 14px", color:"#fff" }}>You know something's off. You just don't know what.</h2>
+            <p style={{ fontSize:15, color:"#6b7280", fontFamily:"sans-serif", maxWidth:480, margin:"0 auto" }}>Every volunteer sound tech has been here. You're not alone — and it's not your fault.</p>
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))", gap:16 }}>
+            {PAINS.map(function(p,i) {
+              return (
+                <div key={i} style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:14, padding:"22px 20px", display:"flex", gap:14, alignItems:"flex-start" }}>
+                  <div style={{ fontSize:26, lineHeight:1, flexShrink:0 }}>{p.icon}</div>
+                  <p style={{ fontSize:13, color:"#9ca3af", lineHeight:1.7, margin:0, fontFamily:"sans-serif", fontStyle:"italic" }}>{p.text}</p>
+                </div>
+              );
+            })}
+          </div>
         </div>
       </section>
-      <section style={{ padding:"100px 20px", background:"#07090f" }}>
+
+      {/* ── SOLUTION / HOW IT WORKS ── */}
+      <section style={{ padding:"80px 20px", background:"#07090f" }}>
         <div style={{ maxWidth:960, margin:"0 auto" }}>
-          <div style={{ textAlign:"center", marginBottom:56 }}>
+          <div style={{ textAlign:"center", marginBottom:52 }}>
             <div style={{ fontSize:10, letterSpacing:4, color:"#00e5a0", fontFamily:"monospace", fontWeight:700, marginBottom:14 }}>HOW IT WORKS</div>
-            <h2 style={{ fontSize:"clamp(26px,4vw,42px)", fontWeight:900, margin:0, letterSpacing:-1.5, color:"#fff" }}>Three steps to a better stream.</h2>
+            <h2 style={{ fontSize:"clamp(26px,4vw,42px)", fontWeight:900, margin:"0 0 12px", letterSpacing:-1.5, color:"#fff" }}>Three steps to a better Sunday.</h2>
+            <p style={{ fontSize:15, color:"#6b7280", fontFamily:"sans-serif", maxWidth:400, margin:"0 auto" }}>No audio degree. No jargon. Just upload, read, and improve.</p>
           </div>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))", gap:20 }}>
             {STEPS.map(function(s,i) {
               return (
-                <div key={i} style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:16, padding:"28px 24px", position:"relative" }}>
-                  <div style={{ position:"absolute", top:18, right:18, fontSize:11, fontFamily:"monospace", fontWeight:700, color:"#1e2535" }}>{s.num}</div>
+                <div key={i} style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:16, padding:"30px 26px", position:"relative" }}>
+                  <div style={{ position:"absolute", top:18, right:20, fontSize:11, fontFamily:"monospace", fontWeight:700, color:"#1e2535" }}>{s.num}</div>
                   <div style={{ fontSize:34, marginBottom:18 }}>{s.icon}</div>
                   <h3 style={{ fontSize:17, fontWeight:800, margin:"0 0 10px", color:"#fff" }}>{s.title}</h3>
                   <p style={{ fontSize:13, color:"#6b7280", lineHeight:1.7, margin:0, fontFamily:"sans-serif" }}>{s.desc}</p>
@@ -2569,20 +2650,25 @@ function HomePage({ navigate, isPro, onUnlockClick }) {
           </div>
         </div>
       </section>
+
+      {/* ── SOCIAL PROOF ── */}
       <section style={{ padding:"80px 20px", background:"#060810" }}>
         <div style={{ maxWidth:960, margin:"0 auto" }}>
           <div style={{ textAlign:"center", marginBottom:48 }}>
-            <div style={{ fontSize:10, letterSpacing:4, color:"#4a7cff", fontFamily:"monospace", fontWeight:700, marginBottom:14 }}>FEATURES</div>
-            <h2 style={{ fontSize:"clamp(26px,4vw,42px)", fontWeight:900, margin:0, letterSpacing:-1.5, color:"#fff" }}>Everything a volunteer engineer needs.</h2>
+            <div style={{ fontSize:10, letterSpacing:4, color:"#4a7cff", fontFamily:"monospace", fontWeight:700, marginBottom:14 }}>WHAT VOLUNTEERS SAY</div>
+            <h2 style={{ fontSize:"clamp(24px,4vw,38px)", fontWeight:900, margin:0, letterSpacing:-1.5, color:"#fff" }}>Real churches. Real improvement.</h2>
           </div>
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))", gap:14 }}>
-            {FEATS.map(function(f,i) {
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))", gap:18 }}>
+            {TESTIMONIALS.map(function(t,i) {
               return (
-                <div key={i} style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:12, padding:"22px 20px", display:"flex", gap:14, alignItems:"flex-start" }}>
-                  <div style={{ fontSize:24, lineHeight:1, marginTop:2 }}>{f.icon}</div>
-                  <div>
-                    <div style={{ fontSize:13, fontWeight:700, color:"#e8eaf0", marginBottom:5, fontFamily:"sans-serif" }}>{f.t}</div>
-                    <div style={{ fontSize:12, color:"#6b7280", lineHeight:1.6, fontFamily:"sans-serif" }}>{f.d}</div>
+                <div key={i} style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:16, padding:"24px 22px" }}>
+                  <div style={{ display:"flex", gap:2, marginBottom:14 }}>
+                    {[1,2,3,4,5].map(function(s) { return <span key={s} style={{ color:"#f59e0b", fontSize:14 }}>★</span>; })}
+                  </div>
+                  <p style={{ fontSize:13, color:"#9ca3af", lineHeight:1.7, fontFamily:"sans-serif", fontStyle:"italic", margin:"0 0 18px" }}>"{t.body}"</p>
+                  <div style={{ borderTop:"1px solid #1a1f2e", paddingTop:14 }}>
+                    <div style={{ fontSize:13, fontWeight:700, color:"#e8eaf0", fontFamily:"sans-serif" }}>{t.name}</div>
+                    <div style={{ fontSize:11, color:"#4a7cff", fontFamily:"sans-serif", marginTop:2 }}>{t.role}</div>
                   </div>
                 </div>
               );
@@ -2590,14 +2676,31 @@ function HomePage({ navigate, isPro, onUnlockClick }) {
           </div>
         </div>
       </section>
-      <section style={{ padding:"80px 20px", textAlign:"center" }}>
+
+      {/* ── TRUST BAR ── */}
+      <section style={{ padding:"40px 20px", background:"#07090f", borderTop:"1px solid #1a1f2e", borderBottom:"1px solid #1a1f2e" }}>
+        <div style={{ maxWidth:860, margin:"0 auto", display:"flex", flexWrap:"wrap", justifyContent:"center", gap:"20px 40px" }}>
+          {TRUST.map(function(t,i) {
+            return (
+              <div key={i} style={{ display:"flex", alignItems:"center", gap:9 }}>
+                <span style={{ fontSize:18 }}>{t.icon}</span>
+                <span style={{ fontSize:13, fontFamily:"sans-serif", color:"#6b7280", fontWeight:500 }}>{t.t}</span>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* ── BOTTOM CTA ── */}
+      <section style={{ padding:"100px 20px", textAlign:"center" }}>
         <div style={{ maxWidth:580, margin:"0 auto" }}>
-          <h2 style={{ fontSize:"clamp(24px,4vw,40px)", fontWeight:900, letterSpacing:-1.5, margin:"0 0 18px", color:"#fff" }}>Ready to sound better this Sunday?</h2>
-          <p style={{ fontSize:15, color:"#6b7280", fontFamily:"sans-serif", marginBottom:32 }}>Free to start. No credit card. Works on your phone.</p>
+          <h2 style={{ fontSize:"clamp(26px,4vw,44px)", fontWeight:900, letterSpacing:-1.5, margin:"0 0 16px", color:"#fff", lineHeight:1.1 }}>Upload your last recording.<br /><span style={{ color:"#00e5a0" }}>Find out your score.</span></h2>
+          <p style={{ fontSize:15, color:"#6b7280", fontFamily:"sans-serif", marginBottom:36, lineHeight:1.6 }}>Free to start. No account. No credit card. Works on your phone between songs.</p>
           <div style={{ display:"flex", gap:12, justifyContent:"center", flexWrap:"wrap" }}>
-            <button onClick={function() { navigate("analyze"); }} style={{ background:"#00e5a0", color:"#07090f", border:"none", borderRadius:10, padding:"14px 30px", fontSize:15, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer" }}>Analyze Free</button>
-            {!isPro && <button onClick={onUnlockClick} style={{ background:"transparent", color:"#6b7280", border:"1px solid #1e2535", borderRadius:10, padding:"14px 30px", fontSize:15, fontFamily:"sans-serif", fontWeight:600, cursor:"pointer" }}>Unlock Pro</button>}
+            <button onClick={function() { navigate("analyze"); }} style={{ background:"#00e5a0", color:"#07090f", border:"none", borderRadius:10, padding:"15px 32px", fontSize:16, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer", boxShadow:"0 0 32px rgba(0,229,160,0.25)" }}>Analyze Free</button>
+            {!isPro && <button onClick={onUnlockClick} style={{ background:"transparent", color:"#9ca3af", border:"1px solid #1e2535", borderRadius:10, padding:"15px 32px", fontSize:16, fontFamily:"sans-serif", fontWeight:600, cursor:"pointer" }}>Unlock Pro</button>}
           </div>
+          <p style={{ fontSize:12, color:"#374151", fontFamily:"sans-serif", marginTop:18 }}>7-day free trial included with Pro · Cancel anytime</p>
         </div>
       </section>
     </div>
