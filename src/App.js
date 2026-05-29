@@ -477,6 +477,14 @@ function wavToBase64DataUrl(buffer) {
     str += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
   return "data:audio/wav;base64," + btoa(str);
 }
+// iOS Safari < 14.5 does not return a Promise from decodeAudioData — use callbacks
+function decodeAudioDataSafe(ctx, arrayBuffer) {
+  return new Promise(function(resolve, reject) {
+    ctx.decodeAudioData(arrayBuffer, resolve, function(e) {
+      reject(e || new Error("Decode failed"));
+    });
+  });
+}
 // iOS Safari may not expose FileReader as a global — use blob.arrayBuffer() first
 async function readBlobAsArrayBuffer(blob) {
   if (blob.arrayBuffer) return blob.arrayBuffer();
@@ -779,7 +787,7 @@ async function decodeSlice(blob) {
     var AudioCtxClass = window.AudioContext || window.webkitAudioContext;
     var ctx = new AudioCtxClass();
     var buf;
-    try { buf = await ctx.decodeAudioData(ab); }
+    try { buf = await decodeAudioDataSafe(ctx, ab); }
     catch(de) { ctx.close(); return null; }
     ctx.close();
     var sr = buf.sampleRate;
@@ -1678,7 +1686,7 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
         // Truncate to 2 minutes for trial users
         var ab = await readBlobAsArrayBuffer(file);
         var tmpCtx = new (window.AudioContext || window.webkitAudioContext)();
-        var decoded = await tmpCtx.decodeAudioData(ab);
+        var decoded = await decodeAudioDataSafe(tmpCtx, ab);
         var maxSamples = Math.min(decoded.length, TRIAL_MAX_SECONDS * decoded.sampleRate);
         var numCh = Math.min(decoded.numberOfChannels, 2);
         var truncBuf = tmpCtx.createBuffer(numCh, maxSamples, decoded.sampleRate);
