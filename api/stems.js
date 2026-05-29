@@ -48,8 +48,9 @@ export default async function handler(req, res) {
 
     if (!response.ok) {
       var errBody = await response.json().catch(function() { return {}; });
-      console.error("Replicate error:", errBody);
-      return res.status(500).json({ error: "Could not start stem separation" });
+      console.error("Replicate error:", JSON.stringify(errBody));
+      var msg = errBody.detail || errBody.title || errBody.error || "Could not start stem separation";
+      return res.status(500).json({ error: "Replicate: " + msg });
     }
 
     var prediction = await response.json();

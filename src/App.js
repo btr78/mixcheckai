@@ -1473,6 +1473,7 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
   var fileRef = useRef(); var fileRef2 = useRef();
   var stemStatusState = useState(null); var stemStatus = stemStatusState[0]; var setStemStatus = stemStatusState[1];
   var stemOutputsState = useState(null); var stemOutputs = stemOutputsState[0]; var setStemOutputs = stemOutputsState[1];
+  var stemErrorState = useState(""); var stemError = stemErrorState[0]; var setStemError = stemErrorState[1];
   var stemMutedState = useState({ drums:false, bass:false, vocals:false, other:false });
   var stemMuted = stemMutedState[0]; var setStemMuted = stemMutedState[1];
   var stemPlayingState = useState(false); var stemPlaying = stemPlayingState[0]; var setStemPlaying = stemPlayingState[1];
@@ -1546,7 +1547,7 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
     setStep(1); setMixer(null); setFile(null); setResults(null);
     setShowCustom(false); setCustomMixer("");
     setMode(null); setCsInstrument(null);
-    setStemStatus(null); setStemOutputs(null);
+    setStemStatus(null); setStemOutputs(null); setStemError("");
     Object.values(stemAudioRefs.current).forEach(function(a) { a.pause(); a.src = ""; });
     stemAudioRefs.current = {};
     setStemMuted({ drums:false, bass:false, vocals:false, other:false });
@@ -1578,8 +1579,8 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ audioBase64: dataUrl }),
       });
-      if (!resp.ok) throw new Error("server");
       var data = await resp.json();
+      if (!resp.ok) { setStemError(data.error || "Server error"); throw new Error("server"); }
       var predId = data.predictionId;
       for (var attempt = 0; attempt < 72; attempt++) {
         await new Promise(function(r) { setTimeout(r, 5000); });
@@ -1590,7 +1591,7 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
         if (sd.status === "failed" || sd.status === "canceled") throw new Error("failed");
       }
       throw new Error("timeout");
-    } catch (e) { setStemStatus("error"); }
+    } catch (e) { if (!stemError) setStemError(e.message || "Unknown error"); setStemStatus("error"); }
   }, [file]);
 
   useEffect(function() {
@@ -2191,8 +2192,8 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
                     )}
                     {stemStatus === "error" && (
                       <div style={{ fontSize:13, color:"#ff5757", fontFamily:"sans-serif" }}>
-                        Could not separate stems. Check your Replicate API key is set, then try again.
-                        <button onClick={function(){setStemStatus(null);}} style={{ marginLeft:12, background:"transparent", border:"1px solid #ff5757", borderRadius:6, padding:"4px 12px", color:"#ff5757", fontSize:11, cursor:"pointer", fontFamily:"sans-serif" }}>Try Again</button>
+                        {stemError || "Could not separate stems. Try again."}
+                        <button onClick={function(){setStemStatus(null);setStemError("");}} style={{ marginLeft:12, background:"transparent", border:"1px solid #ff5757", borderRadius:6, padding:"4px 12px", color:"#ff5757", fontSize:11, cursor:"pointer", fontFamily:"sans-serif" }}>Try Again</button>
                       </div>
                     )}
                   </div>
