@@ -2480,27 +2480,130 @@ function PricingPage({ navigate, isPro, onUnlockClick }) {
   );
 }
 
-function SuccessPage({ navigate, isPro, onUnlockClick }) {
+function SuccessPage({ navigate, isPro, unlockPro }) {
+  var sessionId = new URLSearchParams(window.location.search).get("session_id") || "";
+  var codeState = useState(""); var code = codeState[0]; var setCode = codeState[1];
+  var statusState = useState(sessionId ? "loading" : "manual"); var codeStatus = statusState[0]; var setCsStatus = statusState[1];
+  var copiedState = useState(false); var copied = copiedState[0]; var setCopied = copiedState[1];
+  var activatedState = useState(false); var activated = activatedState[0]; var setActivated = activatedState[1];
+
+  useEffect(function() {
+    if (!sessionId) return;
+    var attempts = 0;
+    var maxAttempts = 20;
+    var interval = null;
+
+    var tryFetch = async function() {
+      attempts++;
+      try {
+        var resp = await fetch("/api/generate-code?session_id=" + encodeURIComponent(sessionId));
+        var data = await resp.json();
+        if (resp.ok && data.code) {
+          clearInterval(interval);
+          setCode(data.code);
+          // Auto-activate on this device
+          try {
+            var actResp = await fetch("/api/activate", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ code: data.code, deviceId: getDeviceId() }),
+            });
+            var actData = await actResp.json();
+            if (actResp.ok && actData.ok) {
+              try {
+                localStorage.setItem("mca_pro_v2", JSON.stringify({ activated:true, lifetime:false, deviceId:getDeviceId(), ts:Date.now() }));
+              } catch(e) {}
+              setActivated(true);
+            }
+          } catch(e) {}
+          setCsStatus("done");
+          return;
+        }
+        if (attempts >= maxAttempts) {
+          clearInterval(interval);
+          setCsStatus("timeout");
+        }
+      } catch(e) {
+        if (attempts >= maxAttempts) {
+          clearInterval(interval);
+          setCsStatus("timeout");
+        }
+      }
+    };
+
+    tryFetch();
+    interval = setInterval(tryFetch, 3000);
+    return function() { clearInterval(interval); };
+  }, [sessionId]);
+
+  var handleCopy = function() {
+    try { navigator.clipboard.writeText(code); } catch(e) {}
+    setCopied(true);
+    setTimeout(function() { setCopied(false); }, 2000);
+  };
+
   return (
     <div style={{ background:"#07090f", minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", padding:"40px 20px", fontFamily:"Georgia,serif" }}>
       <div style={{ textAlign:"center", maxWidth:520 }}>
-        <div style={{ fontSize:48, marginBottom:24 }}>🎉</div>
+        <div style={{ fontSize:48, marginBottom:24 }}>{codeStatus === "done" ? "🎉" : codeStatus === "timeout" ? "📧" : "🎉"}</div>
         <h1 style={{ fontSize:"clamp(26px,4vw,40px)", fontWeight:900, margin:"0 0 14px", letterSpacing:-1.5, color:"#fff" }}>Payment Successful!</h1>
-        <p style={{ fontSize:15, color:"#6b7280", fontFamily:"sans-serif", lineHeight:1.7, marginBottom:28 }}>Thank you for subscribing! Check your email for your Pro access code.</p>
-        {isPro ? (
-          <div style={{ background:"rgba(0,229,160,0.08)", border:"1px solid rgba(0,229,160,0.3)", borderRadius:14, padding:"20px", marginBottom:28 }}>
-            <div style={{ fontSize:14, fontWeight:700, color:"#00e5a0", fontFamily:"sans-serif", marginBottom:4 }}>Pro is Active!</div>
-            <div style={{ fontSize:13, color:"#6b7280", fontFamily:"sans-serif" }}>You have full access to all Pro features.</div>
+        <p style={{ fontSize:15, color:"#6b7280", fontFamily:"sans-serif", lineHeight:1.7, marginBottom:28 }}>Thank you for subscribing to MixCheck AI Pro.</p>
+
+        {/* Loading state */}
+        {codeStatus === "loading" && (
+          <div style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:14, padding:"32px 24px", marginBottom:28 }}>
+            <div style={{ fontSize:13, color:"#6b7280", fontFamily:"sans-serif", marginBottom:16 }}>Generating your access code...</div>
+            <div style={{ width:36, height:36, border:"3px solid #1a1f2e", borderTop:"3px solid #00e5a0", borderRadius:"50%", animation:"spin 0.8s linear infinite", margin:"0 auto" }} />
           </div>
-        ) : (
+        )}
+
+        {/* Code ready */}
+        {codeStatus === "done" && (
+          <div style={{ marginBottom:28 }}>
+            {activated && (
+              <div style={{ background:"rgba(0,229,160,0.08)", border:"1px solid rgba(0,229,160,0.3)", borderRadius:14, padding:"14px 20px", marginBottom:16 }}>
+                <div style={{ fontSize:13, fontWeight:700, color:"#00e5a0", fontFamily:"sans-serif" }}>Pro Activated on This Device!</div>
+              </div>
+            )}
+            <div style={{ background:"#0d1017", border:"2px solid #00e5a0", borderRadius:14, padding:"28px 24px" }}>
+              <div style={{ fontSize:10, letterSpacing:3, color:"#6b7280", fontFamily:"monospace", fontWeight:700, marginBottom:12 }}>YOUR ACCESS CODE</div>
+              <div style={{ fontSize:28, fontWeight:900, color:"#00e5a0", letterSpacing:4, fontFamily:"monospace", marginBottom:20 }}>{code}</div>
+              <button onClick={handleCopy} style={{ background: copied ? "#00c080" : "#00e5a0", color:"#07090f", border:"none", borderRadius:8, padding:"10px 28px", fontSize:13, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer", transition:"background 0.2s" }}>
+                {copied ? "Copied!" : "Copy Code"}
+              </button>
+              <div style={{ fontSize:12, color:"#4a5568", fontFamily:"sans-serif", marginTop:14, lineHeight:1.5 }}>
+                Code also sent to your email. Save it — you'll need it to activate on other devices.
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Timeout — email fallback */}
+        {codeStatus === "timeout" && (
+          <div style={{ background:"#0d1017", border:"1px solid #ffb347", borderRadius:14, padding:"24px", marginBottom:28 }}>
+            <div style={{ fontSize:13, fontWeight:700, color:"#ffb347", fontFamily:"sans-serif", marginBottom:8 }}>Check Your Email</div>
+            <div style={{ fontSize:13, color:"#6b7280", fontFamily:"sans-serif", lineHeight:1.6, marginBottom:16 }}>Your code is on its way. Check your inbox and spam folder. Usually arrives within 1 minute.</div>
+            <div style={{ fontSize:12, color:"#4a5568", fontFamily:"sans-serif" }}>Still nothing? Email <a href="mailto:hello@mixcheckai.com" style={{ color:"#00e5a0", textDecoration:"none" }}>hello@mixcheckai.com</a></div>
+          </div>
+        )}
+
+        {/* Manual — no session_id in URL */}
+        {codeStatus === "manual" && !isPro && (
           <div style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:14, padding:"24px", marginBottom:28 }}>
             <div style={{ fontSize:10, letterSpacing:3, color:"#ffb347", fontFamily:"monospace", fontWeight:700, marginBottom:12 }}>NEXT STEP</div>
             <div style={{ fontSize:14, color:"#e8eaf0", fontFamily:"sans-serif", fontWeight:600, marginBottom:8 }}>Enter your Pro access code</div>
             <div style={{ fontSize:13, color:"#6b7280", fontFamily:"sans-serif", lineHeight:1.6, marginBottom:20 }}>Your access code was sent to your email. Check inbox or spam folder.</div>
-            <button onClick={onUnlockClick} style={{ width:"100%", background:"#00e5a0", color:"#07090f", border:"none", borderRadius:10, padding:"13px", fontSize:14, fontFamily:"sans-serif", fontWeight:800, cursor:"pointer" }}>Enter My Access Code</button>
-            <div style={{ fontSize:12, color:"#4a5568", fontFamily:"sans-serif", marginTop:12 }}>No email? Contact hello@mixcheckai.com</div>
+            <div style={{ fontSize:12, color:"#4a5568", fontFamily:"sans-serif" }}>No email? Contact hello@mixcheckai.com</div>
           </div>
         )}
+
+        {codeStatus === "manual" && isPro && (
+          <div style={{ background:"rgba(0,229,160,0.08)", border:"1px solid rgba(0,229,160,0.3)", borderRadius:14, padding:"20px", marginBottom:28 }}>
+            <div style={{ fontSize:14, fontWeight:700, color:"#00e5a0", fontFamily:"sans-serif", marginBottom:4 }}>Pro is Active!</div>
+            <div style={{ fontSize:13, color:"#6b7280", fontFamily:"sans-serif" }}>You have full access to all Pro features.</div>
+          </div>
+        )}
+
         <div style={{ display:"flex", gap:12, justifyContent:"center", flexWrap:"wrap" }}>
           <button onClick={function() { navigate("analyze"); }} style={{ background:"#00e5a0", color:"#07090f", border:"none", borderRadius:10, padding:"13px 28px", fontSize:14, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer" }}>Start Analyzing</button>
           <button onClick={function() { navigate("home"); }} style={{ background:"transparent", color:"#6b7280", border:"1px solid #1e2535", borderRadius:10, padding:"13px 28px", fontSize:14, fontFamily:"sans-serif", fontWeight:600, cursor:"pointer" }}>Go Home</button>
@@ -2683,12 +2786,8 @@ export default function App() {
   var unlockState = useState(false); var showUnlock = unlockState[0]; var setShowUnlock = unlockState[1];
   var modeState = useState("church"); var appMode = modeState[0]; var setAppMode = modeState[1];
 
-  useEffect(function() {
-    if (page === "success" && !isPro) setShowUnlock(true);
-  }, [page, isPro]);
-
   var renderPage = function() {
-    var props = { navigate:navigate, isPro:isPro, onUnlockClick:function() { setShowUnlock(true); }, appMode:appMode };
+    var props = { navigate:navigate, isPro:isPro, onUnlockClick:function() { setShowUnlock(true); }, appMode:appMode, unlockPro:unlockPro };
     if (page === "home")      return React.createElement(HomePage, props);
     if (page === "analyze")   return React.createElement(AnalyzePage, props);
     if (page === "pricing")   return React.createElement(PricingPage, props);
