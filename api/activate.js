@@ -60,6 +60,12 @@ export default async function handler(req, res) {
     if (stored === "unbound") {
       // First use — bind to this device permanently
       await kvPost(["SET", "code:" + code, "device:" + deviceId]);
+      // Check if this code is marked as lifetime
+      var isLifetimeCode = (await kvPost(["GET", "lifetime_code:" + code])).result === "1";
+      if (isLifetimeCode) {
+        await kvPost(["SET", "lifetime:" + deviceId, "1"]);
+        return res.status(200).json({ ok: true, lifetime: true });
+      }
       // Only set trial flag for trial subscribers; immediate-pay users get unlimited stems
       if (isTrial) {
         await kvPost(["SET", "trial:" + deviceId, "1", "EX", 691200]);
@@ -68,7 +74,12 @@ export default async function handler(req, res) {
     }
 
     if (stored === "device:" + deviceId) {
-      // Same device re-activating — allow
+      // Same device re-activating — re-grant lifetime if applicable
+      var isLifetimeCode2 = (await kvPost(["GET", "lifetime_code:" + code])).result === "1";
+      if (isLifetimeCode2) {
+        await kvPost(["SET", "lifetime:" + deviceId, "1"]);
+        return res.status(200).json({ ok: true, lifetime: true });
+      }
       return res.status(200).json({ ok: true, lifetime: false });
     }
 
