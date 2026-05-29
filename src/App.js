@@ -588,6 +588,50 @@ function Footer({ navigate }) {
   );
 }
 
+// ── KEY DETECTION — Goertzel + Krumhansl-Schmuckler ──────────────────────────
+var KS_MAJOR = [6.35,2.23,3.48,2.33,4.38,4.09,2.52,5.19,2.39,3.66,2.29,2.88];
+var KS_MINOR = [6.33,2.68,3.52,5.38,2.60,3.53,2.54,4.75,3.98,2.69,3.34,3.17];
+var KEY_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+
+function goertzelPow(buf, sampleRate, freq) {
+  var N = buf.length;
+  var k = Math.round(N * freq / sampleRate);
+  var omega = 2 * Math.PI * k / N;
+  var coeff = 2 * Math.cos(omega);
+  var s1 = 0, s2 = 0, s0;
+  for (var i = 0; i < N; i++) { s0 = buf[i] + coeff * s1 - s2; s2 = s1; s1 = s0; }
+  return s2*s2 + s1*s1 - coeff*s1*s2;
+}
+
+function detectKey(signal, sampleRate) {
+  var segLen = Math.min(signal.length, Math.floor(sampleRate * 1.5));
+  var off = Math.floor((signal.length - segLen) / 2);
+  var seg = new Float32Array(segLen);
+  for (var i = 0; i < segLen; i++) {
+    seg[i] = signal[off + i] * 0.5 * (1 - Math.cos(2 * Math.PI * i / (segLen - 1)));
+  }
+  var chroma = new Array(12).fill(0);
+  for (var midi = 48; midi < 96; midi++) {
+    chroma[midi % 12] += goertzelPow(seg, sampleRate, 440 * Math.pow(2, (midi - 69) / 12));
+  }
+  function pearson(a, b) {
+    var n = a.length, sa = 0, sb = 0;
+    for (var i = 0; i < n; i++) { sa += a[i]; sb += b[i]; }
+    var ma = sa/n, mb = sb/n, num = 0, da = 0, db = 0;
+    for (var i = 0; i < n; i++) { num += (a[i]-ma)*(b[i]-mb); da += (a[i]-ma)*(a[i]-ma); db += (b[i]-mb)*(b[i]-mb); }
+    return (da > 0 && db > 0) ? num / Math.sqrt(da * db) : 0;
+  }
+  var best = -Infinity, bestKey = 'C Major';
+  for (var root = 0; root < 12; root++) {
+    var rotMaj = [], rotMin = [];
+    for (var i = 0; i < 12; i++) { rotMaj.push(KS_MAJOR[(i-root+12)%12]); rotMin.push(KS_MINOR[(i-root+12)%12]); }
+    var mc = pearson(chroma, rotMaj), nc = pearson(chroma, rotMin);
+    if (mc > best) { best = mc; bestKey = KEY_NAMES[root] + ' Major'; }
+    if (nc > best) { best = nc; bestKey = KEY_NAMES[root] + ' Minor'; }
+  }
+  return bestKey;
+}
+
 // ── AUDIO ANALYSIS - slices file BEFORE decoding, never loads full 2hr file ───
 async function decodeSlice(blob) {
   return new Promise(function(resolve, reject) {
@@ -668,10 +712,15 @@ async function decodeSlice(blob) {
           return bn>0 ? 20*Math.log10(Math.sqrt(bq/bn)+0.000001) : -60;
         };
 
+        var mono = new Float32Array(total);
+        for (var mi = 0; mi < total; mi++) mono[mi] = (L[mi] + R[mi]) * 0.5;
+        var detectedKey = detectKey(mono, sr);
+
         resolve({
           lufs:lufs, peakDb:peakDb, dynRange:dynRange, stereoWidth:stereoWidth,
           duration: Math.round(total/sr), sampleRate:sr, channels:numCh,
-          freq:{ sub:gb(20,80), low:gb(80,250), lowMid:gb(250,600), mid:gb(600,2500), highMid:gb(2500,7000), high:gb(7000,14000), air:gb(14000,20000) }
+          freq:{ sub:gb(20,80), low:gb(80,250), lowMid:gb(250,600), mid:gb(600,2500), highMid:gb(2500,7000), high:gb(7000,14000), air:gb(14000,20000) },
+          detectedKey:detectedKey,
         });
       } catch(err) { resolve(null); }
     };
@@ -756,6 +805,7 @@ async function measureAudio(file) {
     sampleRate: sliceResults[0] ? sliceResults[0].sampleRate : 44100,
     channels: sliceResults[0] ? sliceResults[0].channels : 2,
     fileSize: Math.round(file.size/1024),
+    detectedKey: sliceResults[0] ? sliceResults[0].detectedKey : null,
   };
 }
 
@@ -1383,6 +1433,8 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
   var resultsState = useState(null); var results = resultsState[0]; var setResults = resultsState[1];
   var dragState = useState(false); var dragOver = dragState[0]; var setDragOver = dragState[1];
   var fileRef = useRef(); var fileRef2 = useRef();
+  var stemStatusState = useState(null); var stemStatus = stemStatusState[0]; var setStemStatus = stemStatusState[1];
+  var stemOutputsState = useState(null); var stemOutputs = stemOutputsState[0]; var setStemOutputs = stemOutputsState[1];
 
   var selectedMixer = showCustom && customMixer.trim()
     ? { id:"custom", name: customMixer.trim(), type:"unknown", streams:"Aux/Main Out" }
@@ -1449,8 +1501,43 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
     setStep(1); setMixer(null); setFile(null); setResults(null);
     setShowCustom(false); setCustomMixer("");
     setMode(null); setCsInstrument(null);
+    setStemStatus(null); setStemOutputs(null);
   };
   var prioColor = function(p) { return ({ high:"#ff5757", med:"#ffb347", ok:"#00e5a0", tip:"#4a7cff" })[p] || "#4a5568"; };
+
+  var handleStemSeparation = useCallback(async function() {
+    if (!file) return;
+    var MAX_STEM_BYTES = 3 * 1024 * 1024;
+    if (file.size > MAX_STEM_BYTES) {
+      setStemStatus("toolarge"); return;
+    }
+    setStemStatus("loading"); setStemOutputs(null);
+    try {
+      var dataUrl = await new Promise(function(resolve, reject) {
+        var rd = new FileReader();
+        rd.onload = function(e) { resolve(e.target.result); };
+        rd.onerror = reject;
+        rd.readAsDataURL(file);
+      });
+      var resp = await fetch("/api/stems", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ audioBase64: dataUrl }),
+      });
+      if (!resp.ok) throw new Error("server");
+      var data = await resp.json();
+      var predId = data.predictionId;
+      for (var attempt = 0; attempt < 72; attempt++) {
+        await new Promise(function(r) { setTimeout(r, 5000); });
+        var sr2 = await fetch("/api/stems-status?id=" + predId);
+        if (!sr2.ok) continue;
+        var sd = await sr2.json();
+        if (sd.status === "succeeded") { setStemOutputs(sd.output); setStemStatus("done"); return; }
+        if (sd.status === "failed" || sd.status === "canceled") throw new Error("failed");
+      }
+      throw new Error("timeout");
+    } catch (e) { setStemStatus("error"); }
+  }, [file]);
 
   return (
     <div style={{ background:"#07090f", minHeight:"100vh", paddingTop:80, fontFamily:"Georgia,serif", color:"#e8eaf0" }}>
@@ -1787,6 +1874,14 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
                       </div>
                     );
                   })}
+                  {results.detectedKey && (
+                    <div style={{ background:"#0d1017", border:"1px solid #a78bfa33", borderRadius:12, padding:"14px" }}>
+                      <div style={{ fontSize:9, letterSpacing:2, color:"#4a5568", fontFamily:"monospace", fontWeight:700, marginBottom:6 }}>KEY DETECTED</div>
+                      <div style={{ fontSize:17, fontWeight:900, color:"#a78bfa", letterSpacing:-0.5, marginBottom:2 }}>{results.detectedKey}</div>
+                      <div style={{ fontSize:10, color:"#a78bfa", fontWeight:700, fontFamily:"sans-serif", marginBottom:3 }}>Musical Key</div>
+                      <div style={{ fontSize:9, color:"#2a3040", fontFamily:"sans-serif" }}>Estimated from audio</div>
+                    </div>
+                  )}
                 </div>
                 <div style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:16, padding:"18px", marginBottom:18 }}>
                   <div style={{ fontSize:10, letterSpacing:3, color:"#00e5a0", fontFamily:"monospace", fontWeight:700, marginBottom:14 }}>RECOMMENDATIONS</div>
@@ -1818,6 +1913,78 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
                     );
                   })}
                 </div>
+                {/* STEM SEPARATION */}
+                {isPro ? (
+                  <div style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:16, padding:"18px", marginBottom:18 }}>
+                    <div style={{ fontSize:10, letterSpacing:3, color:"#a78bfa", fontFamily:"monospace", fontWeight:700, marginBottom:12 }}>STEM SEPARATION</div>
+                    {!stemStatus && (
+                      <div>
+                        <div style={{ fontSize:13, color:"#6b7280", fontFamily:"sans-serif", lineHeight:1.6, marginBottom:12 }}>
+                          Split this recording into drums, bass, vocals, and other instruments. Works best on files under 3 minutes.
+                        </div>
+                        {file && file.size > 3*1024*1024 ? (
+                          <div style={{ fontSize:12, color:"#ffb347", fontFamily:"sans-serif" }}>
+                            File is too large for stems. Export a 1-3 minute section as MP3 (128kbps) and re-upload.
+                          </div>
+                        ) : (
+                          <button onClick={handleStemSeparation} style={{ background:"linear-gradient(135deg,#7c3aed,#a78bfa)", color:"#fff", border:"none", borderRadius:8, padding:"10px 22px", fontSize:13, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer" }}>
+                            Separate Stems
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    {stemStatus === "loading" && (
+                      <div style={{ display:"flex", alignItems:"center", gap:14 }}>
+                        <div style={{ width:22, height:22, border:"2px solid #2a2040", borderTop:"2px solid #a78bfa", borderRadius:"50%", animation:"spin 0.8s linear infinite", flexShrink:0 }} />
+                        <div>
+                          <div style={{ fontSize:13, color:"#e8eaf0", fontFamily:"sans-serif", fontWeight:600 }}>Separating stems...</div>
+                          <div style={{ fontSize:11, color:"#4a5568", fontFamily:"sans-serif", marginTop:3 }}>This takes 1-4 minutes. Stay on this page.</div>
+                        </div>
+                      </div>
+                    )}
+                    {stemStatus === "toolarge" && (
+                      <div style={{ fontSize:13, color:"#ffb347", fontFamily:"sans-serif" }}>
+                        File is too large. Export a 1-3 minute clip as MP3 (128kbps) then re-upload for stems.
+                        <button onClick={function(){setStemStatus(null);}} style={{ marginLeft:12, background:"transparent", border:"1px solid #ffb347", borderRadius:6, padding:"4px 12px", color:"#ffb347", fontSize:11, cursor:"pointer", fontFamily:"sans-serif" }}>OK</button>
+                      </div>
+                    )}
+                    {stemStatus === "done" && stemOutputs && (
+                      <div>
+                        <div style={{ fontSize:12, color:"#00e5a0", fontFamily:"sans-serif", fontWeight:700, marginBottom:12 }}>Stems ready — click to download:</div>
+                        <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+                          {Object.entries(stemOutputs).map(function(entry, ei) {
+                            var labels = { drums:"Drums", bass:"Bass", vocals:"Vocals", other:"Other" };
+                            var icons  = { drums:"🥁", bass:"🎸", vocals:"🎤", other:"🎹" };
+                            var k = entry[0], v = entry[1];
+                            return (
+                              <a key={ei} href={v} target="_blank" rel="noopener noreferrer"
+                                style={{ background:"rgba(167,139,250,0.1)", border:"1px solid rgba(167,139,250,0.3)", borderRadius:8, padding:"9px 16px", fontSize:12, color:"#a78bfa", fontFamily:"sans-serif", fontWeight:700, textDecoration:"none", display:"inline-flex", alignItems:"center", gap:6 }}>
+                                {icons[k] || "🎵"} {labels[k] || k}
+                              </a>
+                            );
+                          })}
+                        </div>
+                        <button onClick={function(){setStemStatus(null);setStemOutputs(null);}} style={{ marginTop:12, background:"transparent", border:"1px solid #2a2040", borderRadius:6, padding:"5px 12px", color:"#4a5568", fontSize:11, cursor:"pointer", fontFamily:"sans-serif" }}>Separate Another</button>
+                      </div>
+                    )}
+                    {stemStatus === "error" && (
+                      <div style={{ fontSize:13, color:"#ff5757", fontFamily:"sans-serif" }}>
+                        Could not separate stems. Check your Replicate API key is set, then try again.
+                        <button onClick={function(){setStemStatus(null);}} style={{ marginLeft:12, background:"transparent", border:"1px solid #ff5757", borderRadius:6, padding:"4px 12px", color:"#ff5757", fontSize:11, cursor:"pointer", fontFamily:"sans-serif" }}>Try Again</button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:16, padding:"18px", marginBottom:18 }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:12 }}>
+                      <div>
+                        <div style={{ fontSize:13, fontWeight:700, color:"#e8eaf0", fontFamily:"sans-serif", marginBottom:4 }}>🔒 Stem Separation</div>
+                        <div style={{ fontSize:12, color:"#6b7280", fontFamily:"sans-serif" }}>Pro: split any recording into drums, bass, vocals, and instruments.</div>
+                      </div>
+                      <button onClick={onUnlockClick} style={{ background:"linear-gradient(135deg,#7c3aed,#a78bfa)", color:"#fff", border:"none", borderRadius:8, padding:"10px 20px", fontSize:12, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}>Unlock Pro</button>
+                    </div>
+                  </div>
+                )}
                 {!isPro && (
                   <div style={{ background:"linear-gradient(135deg,rgba(0,229,160,0.07),rgba(0,229,160,0.02))", border:"1px solid rgba(0,229,160,0.25)", borderRadius:14, padding:"18px", marginBottom:20 }}>
                     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:12 }}>
