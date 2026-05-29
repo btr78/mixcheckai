@@ -1435,6 +1435,10 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
   var fileRef = useRef(); var fileRef2 = useRef();
   var stemStatusState = useState(null); var stemStatus = stemStatusState[0]; var setStemStatus = stemStatusState[1];
   var stemOutputsState = useState(null); var stemOutputs = stemOutputsState[0]; var setStemOutputs = stemOutputsState[1];
+  var stemMutedState = useState({ drums:false, bass:false, vocals:false, other:false });
+  var stemMuted = stemMutedState[0]; var setStemMuted = stemMutedState[1];
+  var stemPlayingState = useState(false); var stemPlaying = stemPlayingState[0]; var setStemPlaying = stemPlayingState[1];
+  var stemAudioRefs = useRef({});
 
   var selectedMixer = showCustom && customMixer.trim()
     ? { id:"custom", name: customMixer.trim(), type:"unknown", streams:"Aux/Main Out" }
@@ -1502,6 +1506,10 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
     setShowCustom(false); setCustomMixer("");
     setMode(null); setCsInstrument(null);
     setStemStatus(null); setStemOutputs(null);
+    Object.values(stemAudioRefs.current).forEach(function(a) { a.pause(); a.src = ""; });
+    stemAudioRefs.current = {};
+    setStemMuted({ drums:false, bass:false, vocals:false, other:false });
+    setStemPlaying(false);
   };
   var prioColor = function(p) { return ({ high:"#ff5757", med:"#ffb347", ok:"#00e5a0", tip:"#4a7cff" })[p] || "#4a5568"; };
 
@@ -1538,6 +1546,51 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
       throw new Error("timeout");
     } catch (e) { setStemStatus("error"); }
   }, [file]);
+
+  useEffect(function() {
+    if (!stemOutputs) return;
+    var created = [];
+    Object.keys(stemOutputs).forEach(function(k) {
+      var a = new Audio(stemOutputs[k]);
+      a.crossOrigin = "anonymous";
+      stemAudioRefs.current[k] = a;
+      created.push(a);
+    });
+    return function() {
+      created.forEach(function(a) { a.pause(); a.src = ""; });
+      stemAudioRefs.current = {};
+    };
+  }, [stemOutputs]);
+
+  var handleStemPlayPause = function() {
+    var refs = stemAudioRefs.current;
+    var keys = Object.keys(refs);
+    if (keys.length === 0) return;
+    if (stemPlaying) {
+      keys.forEach(function(k) { refs[k].pause(); });
+      setStemPlaying(false);
+    } else {
+      var t = refs[keys[0]].currentTime;
+      keys.forEach(function(k) { refs[k].currentTime = t; });
+      var plays = keys.map(function(k) { return refs[k].play().catch(function(){}); });
+      Promise.all(plays).then(function() { setStemPlaying(true); });
+    }
+  };
+
+  var handleStemStop = function() {
+    var refs = stemAudioRefs.current;
+    Object.keys(refs).forEach(function(k) { refs[k].pause(); refs[k].currentTime = 0; });
+    setStemPlaying(false);
+  };
+
+  var handleStemMute = function(key) {
+    var a = stemAudioRefs.current[key];
+    if (!a) return;
+    var next = Object.assign({}, stemMuted);
+    next[key] = !next[key];
+    a.muted = next[key];
+    setStemMuted(next);
+  };
 
   return (
     <div style={{ background:"#07090f", minHeight:"100vh", paddingTop:80, fontFamily:"Georgia,serif", color:"#e8eaf0" }}>
@@ -1950,21 +2003,57 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
                     )}
                     {stemStatus === "done" && stemOutputs && (
                       <div>
-                        <div style={{ fontSize:12, color:"#00e5a0", fontFamily:"sans-serif", fontWeight:700, marginBottom:12 }}>Stems ready — click to download:</div>
-                        <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
-                          {Object.entries(stemOutputs).map(function(entry, ei) {
-                            var labels = { drums:"Drums", bass:"Bass", vocals:"Vocals", other:"Other" };
-                            var icons  = { drums:"🥁", bass:"🎸", vocals:"🎤", other:"🎹" };
-                            var k = entry[0], v = entry[1];
+                        <div style={{ fontSize:12, color:"#00e5a0", fontFamily:"sans-serif", fontWeight:700, marginBottom:14 }}>
+                          Stems ready — mute any track to practice your part:
+                        </div>
+                        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(148px,1fr))", gap:10, marginBottom:14 }}>
+                          {["drums","bass","vocals","other"].filter(function(k){ return stemOutputs[k]; }).map(function(k) {
+                            var LABELS = { drums:"Drums", bass:"Bass", vocals:"Vocals", other:"Other / Keys" };
+                            var ICONS  = { drums:"🥁", bass:"🎸", vocals:"🎤", other:"🎹" };
+                            var COLORS = { drums:"#ff5757", bass:"#4a7cff", vocals:"#00e5a0", other:"#ffb347" };
+                            var isMuted = !!stemMuted[k];
+                            var col = COLORS[k];
                             return (
-                              <a key={ei} href={v} target="_blank" rel="noopener noreferrer"
-                                style={{ background:"rgba(167,139,250,0.1)", border:"1px solid rgba(167,139,250,0.3)", borderRadius:8, padding:"9px 16px", fontSize:12, color:"#a78bfa", fontFamily:"sans-serif", fontWeight:700, textDecoration:"none", display:"inline-flex", alignItems:"center", gap:6 }}>
-                                {icons[k] || "🎵"} {labels[k] || k}
-                              </a>
+                              <div key={k} style={{ background: isMuted?"#0a0c14":"rgba(10,12,20,0.9)", border:"1px solid "+(isMuted?"#1a1f2e":col+"44"), borderRadius:12, padding:"14px 12px", opacity: isMuted?0.45:1, transition:"all 0.15s" }}>
+                                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+                                  <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                                    <span style={{ fontSize:18 }}>{ICONS[k]}</span>
+                                    <span style={{ fontSize:12, fontWeight:700, color: isMuted?"#4a5568":col, fontFamily:"sans-serif" }}>{LABELS[k]}</span>
+                                  </div>
+                                  <a href={stemOutputs[k]} download={k+".mp3"} target="_blank" rel="noopener noreferrer"
+                                    onClick={function(e){e.stopPropagation();}}
+                                    title={"Download "+LABELS[k]}
+                                    style={{ fontSize:14, color:"#2a3040", textDecoration:"none", lineHeight:1 }}>
+                                    ↓
+                                  </a>
+                                </div>
+                                <button onClick={function(){handleStemMute(k);}}
+                                  style={{ width:"100%", border:"1px solid "+(isMuted?"#2a3040":col+"55"), borderRadius:7, padding:"8px 6px", fontSize:11, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer", background: isMuted?"transparent":col+"18", color: isMuted?"#4a5568":col, transition:"all 0.15s", letterSpacing:0.5 }}>
+                                  {isMuted ? "MUTED — tap to unmute" : "MUTE"}
+                                </button>
+                              </div>
                             );
                           })}
                         </div>
-                        <button onClick={function(){setStemStatus(null);setStemOutputs(null);}} style={{ marginTop:12, background:"transparent", border:"1px solid #2a2040", borderRadius:6, padding:"5px 12px", color:"#4a5568", fontSize:11, cursor:"pointer", fontFamily:"sans-serif" }}>Separate Another</button>
+                        <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
+                          <button onClick={handleStemPlayPause}
+                            style={{ background:"linear-gradient(135deg,#7c3aed,#a78bfa)", color:"#fff", border:"none", borderRadius:8, padding:"10px 22px", fontSize:13, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer", minWidth:108 }}>
+                            {stemPlaying ? "⏸  Pause" : "▶  Play All"}
+                          </button>
+                          {stemPlaying && (
+                            <button onClick={handleStemStop}
+                              style={{ background:"transparent", border:"1px solid #2a2040", borderRadius:8, padding:"10px 16px", fontSize:13, fontFamily:"sans-serif", color:"#6b7280", cursor:"pointer" }}>
+                              ■  Stop
+                            </button>
+                          )}
+                          <button onClick={function(){handleStemStop();setStemStatus(null);setStemOutputs(null);setStemMuted({drums:false,bass:false,vocals:false,other:false});}}
+                            style={{ background:"transparent", border:"1px solid #1a1f2e", borderRadius:6, padding:"5px 12px", color:"#4a5568", fontSize:11, cursor:"pointer", fontFamily:"sans-serif", marginLeft:"auto" }}>
+                            Separate Another
+                          </button>
+                        </div>
+                        <div style={{ fontSize:11, color:"#2a3040", fontFamily:"sans-serif", marginTop:10 }}>
+                          Tip: mute your own instrument and play along with the rest of the band.
+                        </div>
                       </div>
                     )}
                     {stemStatus === "error" && (
