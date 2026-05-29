@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 
 const STRIPE_PAYMENT_LINK = "https://buy.stripe.com/3cIcN6gBO375e6dbQkgbm03";
 const STRIPE_PAYMENT_LINK_NOTRIAL = "https://buy.stripe.com/dRmbJ271e9vte6d5rWgbm04"; // no-trial link — pay $9.99 today, unlimited stems immediately
+const STRIPE_CREDITS_LINK = "REPLACE_WITH_CREDITS_LINK"; // one-time $2.99 for 10 stem credits
 
 // ── STRIPE PAYMENT LINKS ──────────────────────────────────────────────────────
 const STRIPE_TEAM_LINK = "https://buy.stripe.com/3cIcN6gBO375e6dbQkgbm03"; // replace with team plan link
@@ -1552,6 +1553,7 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
   var stemMuted = stemMutedState[0]; var setStemMuted = stemMutedState[1];
   var stemPlayingState = useState(false); var stemPlaying = stemPlayingState[0]; var setStemPlaying = stemPlayingState[1];
   var stemAudioRefs = useRef({});
+  var stemsBalanceState = useState(null); var stemsBalance = stemsBalanceState[0]; var setStemsBalance = stemsBalanceState[1];
   var clickMutedState = useState(true); var clickMuted = clickMutedState[0]; var setClickMuted = clickMutedState[1];
   var clickBpmState = useState(120); var clickBpm = clickBpmState[0]; var setClickBpm = clickBpmState[1];
   var clickRef = useRef({ ctx:null, intervalId:null, gainNode:null });
@@ -1676,6 +1678,8 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
       if (!resp.ok) { errMsg = data.error || "Server error"; throw new Error(errMsg); }
       if (trial.isTrial) {
         try { localStorage.setItem("mca_trial_stems", String(trial.stemsUsed + 1)); } catch(e) {}
+      } else if (data.balance) {
+        setStemsBalance(data.balance);
       }
       var predId = data.predictionId;
       for (var attempt = 0; attempt < 72; attempt++) {
@@ -1709,6 +1713,16 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
   useEffect(function() {
     if (results && results.bpm) setClickBpm(results.bpm);
   }, [results]);
+
+  useEffect(function() {
+    if (!isPro) return;
+    var trial = getTrialInfo();
+    if (trial.isTrial) return; // trial balance is tracked separately
+    fetch("/api/stems-balance?deviceId=" + encodeURIComponent(getDeviceId()))
+      .then(function(r) { return r.json(); })
+      .then(function(d) { setStemsBalance(d); })
+      .catch(function() {});
+  }, [isPro]);
 
   var startClick = function(bpm) {
     var ref = clickRef.current;
@@ -2181,26 +2195,57 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
                     <div style={{ fontSize:10, letterSpacing:3, color:"#a78bfa", fontFamily:"monospace", fontWeight:700, marginBottom:12 }}>STEM SEPARATION</div>
                     {!stemStatus && (function() {
                       var trial = getTrialInfo();
+                      var bal = stemsBalance;
+                      var isLifetime = bal && bal.isLifetime;
+                      var monthlyLeft = bal ? Math.max(0, bal.monthly_limit - bal.monthly_used) : null;
+                      var totalLeft = isLifetime ? Infinity : (bal ? (monthlyLeft + (bal.credits || 0)) : null);
+                      var outOfStems = !trial.isTrial && !isLifetime && bal && totalLeft <= 0;
                       return (
                         <div>
-                          <div style={{ fontSize:13, color:"#6b7280", fontFamily:"sans-serif", lineHeight:1.6, marginBottom:12 }}>
+                          <div style={{ fontSize:13, color:"#6b7280", fontFamily:"sans-serif", lineHeight:1.6, marginBottom:10 }}>
                             Split this recording into drums, bass, vocals, and other instruments.
-                            {trial.isTrial && <span style={{ color:"#a78bfa" }}> Trial: first 2 min of each song.</span>}
+                            {trial.isTrial && <span style={{ color:"#a78bfa" }}> Trial: first 2 min.</span>}
                           </div>
+                          {/* Balance bar */}
                           {trial.isTrial && (
                             <div style={{ fontSize:11, color: trial.stemsLeft > 0 ? "#a78bfa" : "#ff5757", fontFamily:"monospace", fontWeight:700, marginBottom:10, letterSpacing:1 }}>
-                              {trial.stemsLeft > 0 ? trial.stemsLeft + " of " + TRIAL_STEM_LIMIT + " trial separations remaining" : "Trial limit reached — unlimited after trial ends"}
+                              {trial.stemsLeft > 0 ? trial.stemsLeft + " of " + TRIAL_STEM_LIMIT + " trial separations left" : "Trial limit reached — unlimited monthly access after trial"}
                             </div>
                           )}
-                          {!trial.isTrial && file && file.size > 3*1024*1024 ? (
+                          {!trial.isTrial && !isLifetime && bal && (
+                            <div style={{ marginBottom:12 }}>
+                              <div style={{ display:"flex", justifyContent:"space-between", marginBottom:4 }}>
+                                <span style={{ fontSize:11, color:"#6b7280", fontFamily:"monospace" }}>{bal.monthly_used}/{bal.monthly_limit} this month</span>
+                                {bal.credits > 0 && <span style={{ fontSize:11, color:"#a78bfa", fontFamily:"monospace" }}>+{bal.credits} bonus credits</span>}
+                              </div>
+                              <div style={{ height:4, background:"#1a1f2e", borderRadius:2, overflow:"hidden" }}>
+                                <div style={{ height:"100%", width: Math.min(100, (bal.monthly_used/bal.monthly_limit)*100)+"%", background: monthlyLeft > 3 ? "#a78bfa" : monthlyLeft > 0 ? "#ffb347" : "#ff5757", borderRadius:2, transition:"width 0.3s" }} />
+                              </div>
+                            </div>
+                          )}
+                          {outOfStems ? (
+                            <div>
+                              <div style={{ fontSize:13, color:"#ff5757", fontFamily:"sans-serif", marginBottom:10 }}>Monthly limit reached. Buy more stems to continue.</div>
+                              <button onClick={function() { window.open(STRIPE_CREDITS_LINK,"_blank"); }} style={{ background:"linear-gradient(135deg,#7c3aed,#a78bfa)", color:"#fff", border:"none", borderRadius:8, padding:"10px 22px", fontSize:13, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer" }}>
+                                Buy 10 more stems — $2.99
+                              </button>
+                            </div>
+                          ) : !trial.isTrial && file && file.size > 3*1024*1024 ? (
                             <div style={{ fontSize:12, color:"#ffb347", fontFamily:"sans-serif" }}>
-                              File is too large for stems. Export a 1-3 minute section as MP3 (128kbps) and re-upload.
+                              File is too large. Export a 1-3 minute clip as MP3 (128kbps) then re-upload.
                             </div>
                           ) : (
-                            <button onClick={handleStemSeparation} disabled={trial.isTrial && trial.stemsLeft <= 0}
-                              style={{ background: trial.isTrial && trial.stemsLeft <= 0 ? "#2a2040" : "linear-gradient(135deg,#7c3aed,#a78bfa)", color: trial.isTrial && trial.stemsLeft <= 0 ? "#4a5568" : "#fff", border:"none", borderRadius:8, padding:"10px 22px", fontSize:13, fontFamily:"sans-serif", fontWeight:700, cursor: trial.isTrial && trial.stemsLeft <= 0 ? "not-allowed" : "pointer" }}>
-                              Separate Stems
-                            </button>
+                            <div style={{ display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
+                              <button onClick={handleStemSeparation} disabled={trial.isTrial && trial.stemsLeft <= 0}
+                                style={{ background: trial.isTrial && trial.stemsLeft <= 0 ? "#2a2040" : "linear-gradient(135deg,#7c3aed,#a78bfa)", color: trial.isTrial && trial.stemsLeft <= 0 ? "#4a5568" : "#fff", border:"none", borderRadius:8, padding:"10px 22px", fontSize:13, fontFamily:"sans-serif", fontWeight:700, cursor: trial.isTrial && trial.stemsLeft <= 0 ? "not-allowed" : "pointer" }}>
+                                Separate Stems
+                              </button>
+                              {!trial.isTrial && !isLifetime && monthlyLeft !== null && monthlyLeft <= 3 && totalLeft > 0 && (
+                                <button onClick={function() { window.open(STRIPE_CREDITS_LINK,"_blank"); }} style={{ background:"transparent", border:"1px solid rgba(167,139,250,0.3)", borderRadius:8, padding:"9px 16px", color:"#a78bfa", fontSize:12, fontFamily:"sans-serif", fontWeight:600, cursor:"pointer" }}>
+                                  + Buy more stems
+                                </button>
+                              )}
+                            </div>
                           )}
                         </div>
                       );
@@ -2560,11 +2605,14 @@ function PricingPage({ navigate, isPro, onUnlockClick }) {
 }
 
 function SuccessPage({ navigate, isPro, unlockPro }) {
-  var sessionId = (new URLSearchParams(window.location.search).get("session_id") || "").replace(/\s/g, "");
+  var params = new URLSearchParams(window.location.search);
+  var sessionId = (params.get("session_id") || "").replace(/\s/g, "");
+  var pageType = params.get("type") || "pro"; // "pro" or "credits"
   var codeState = useState(""); var code = codeState[0]; var setCode = codeState[1];
   var statusState = useState(sessionId ? "loading" : "manual"); var codeStatus = statusState[0]; var setCsStatus = statusState[1];
   var copiedState = useState(false); var copied = copiedState[0]; var setCopied = copiedState[1];
   var activatedState = useState(false); var activated = activatedState[0]; var setActivated = activatedState[1];
+  var creditsAddedState = useState(0); var creditsAdded = creditsAddedState[0]; var setCreditsAdded = creditsAddedState[1];
 
   useEffect(function() {
     if (!sessionId) return;
@@ -2575,28 +2623,40 @@ function SuccessPage({ navigate, isPro, unlockPro }) {
     var tryFetch = async function() {
       attempts++;
       try {
-        var resp = await fetch("/api/generate-code?session_id=" + encodeURIComponent(sessionId));
-        var data = await resp.json();
-        if (resp.ok && data.code) {
-          clearInterval(interval);
-          setCode(data.code);
-          // Auto-activate on this device
-          try {
-            var actResp = await fetch("/api/activate", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ code: data.code, deviceId: getDeviceId(), isTrial: data.isTrial !== false }),
-            });
-            var actData = await actResp.json();
-            if (actResp.ok && actData.ok) {
-              try {
-                localStorage.setItem("mca_pro_v2", JSON.stringify({ activated:true, lifetime:false, deviceId:getDeviceId(), ts: data.isTrial !== false ? Date.now() : 0 }));
-              } catch(e) {}
-              setActivated(true);
-            }
-          } catch(e) {}
-          setCsStatus("done");
-          return;
+        if (pageType === "credits") {
+          // Credits purchase flow
+          var cr = await fetch("/api/add-stems?session_id=" + encodeURIComponent(sessionId) + "&deviceId=" + encodeURIComponent(getDeviceId()));
+          var cd = await cr.json();
+          if (cr.ok && cd.ok) {
+            clearInterval(interval);
+            setCreditsAdded(cd.credits_added || 10);
+            setCsStatus("done");
+            return;
+          }
+        } else {
+          // Pro activation flow
+          var resp = await fetch("/api/generate-code?session_id=" + encodeURIComponent(sessionId));
+          var data = await resp.json();
+          if (resp.ok && data.code) {
+            clearInterval(interval);
+            setCode(data.code);
+            try {
+              var actResp = await fetch("/api/activate", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ code: data.code, deviceId: getDeviceId(), isTrial: data.isTrial !== false }),
+              });
+              var actData = await actResp.json();
+              if (actResp.ok && actData.ok) {
+                try {
+                  localStorage.setItem("mca_pro_v2", JSON.stringify({ activated:true, lifetime:false, deviceId:getDeviceId(), ts: data.isTrial !== false ? Date.now() : 0 }));
+                } catch(e) {}
+                setActivated(true);
+              }
+            } catch(e) {}
+            setCsStatus("done");
+            return;
+          }
         }
         if (attempts >= maxAttempts) {
           clearInterval(interval);
@@ -2636,8 +2696,17 @@ function SuccessPage({ navigate, isPro, unlockPro }) {
           </div>
         )}
 
-        {/* Code ready */}
-        {codeStatus === "done" && (
+        {/* Credits added */}
+        {codeStatus === "done" && pageType === "credits" && (
+          <div style={{ background:"rgba(167,139,250,0.08)", border:"2px solid rgba(167,139,250,0.4)", borderRadius:14, padding:"28px 24px", marginBottom:28, textAlign:"center" }}>
+            <div style={{ fontSize:36, marginBottom:12 }}>🎉</div>
+            <div style={{ fontSize:20, fontWeight:900, color:"#a78bfa", fontFamily:"sans-serif", marginBottom:8 }}>{creditsAdded} Stem Credits Added!</div>
+            <div style={{ fontSize:13, color:"#6b7280", fontFamily:"sans-serif" }}>Your credits never expire. Use them anytime in the Analyze page.</div>
+          </div>
+        )}
+
+        {/* Pro code ready */}
+        {codeStatus === "done" && pageType !== "credits" && (
           <div style={{ marginBottom:28 }}>
             {activated && (
               <div style={{ background:"rgba(0,229,160,0.08)", border:"1px solid rgba(0,229,160,0.3)", borderRadius:14, padding:"14px 20px", marginBottom:16 }}>

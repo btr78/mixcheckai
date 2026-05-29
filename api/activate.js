@@ -22,6 +22,12 @@ export default async function handler(req, res) {
   // ── Master lifetime code (no device binding) ────────────────────────────────
   var master = (process.env.MASTER_PRO_CODE || "").trim().toUpperCase();
   if (master && code === master) {
+    // Store lifetime flag in KV so stems.js can verify server-side
+    var KV_URL2 = process.env.KV_REST_API_URL;
+    var KV_TOKEN2 = process.env.KV_REST_API_TOKEN;
+    if (deviceId && KV_URL2 && KV_TOKEN2) {
+      fetch(KV_URL2, { method:"POST", headers:{ "Authorization":"Bearer "+KV_TOKEN2, "Content-Type":"application/json" }, body:JSON.stringify(["SET","lifetime:"+deviceId,"1"]) }).catch(function(){});
+    }
     return res.status(200).json({ ok: true, lifetime: true });
   }
 
