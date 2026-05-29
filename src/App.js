@@ -432,6 +432,50 @@ function getDeviceId() {
   } catch(e) { return "unknown"; }
 }
 
+var TRIAL_STEM_LIMIT = 3;
+var TRIAL_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
+var TRIAL_MAX_SECONDS = 120; // 2 minutes
+
+function getTrialInfo() {
+  try {
+    var d = JSON.parse(localStorage.getItem("mca_pro_v2") || "{}");
+    var isTrial = d.activated && !d.lifetime && (Date.now() - (d.ts || 0)) < TRIAL_DURATION_MS;
+    var stemsUsed = parseInt(localStorage.getItem("mca_trial_stems") || "0", 10);
+    return { isTrial: isTrial, stemsUsed: stemsUsed, stemsLeft: Math.max(0, TRIAL_STEM_LIMIT - stemsUsed) };
+  } catch(e) { return { isTrial: false, stemsUsed: 0, stemsLeft: TRIAL_STEM_LIMIT }; }
+}
+
+function encodeWAV(audioBuffer) {
+  var numCh = Math.min(audioBuffer.numberOfChannels, 2);
+  var sr = audioBuffer.sampleRate;
+  var numFrames = audioBuffer.length;
+  var dataSize = numFrames * numCh * 2;
+  var buf = new ArrayBuffer(44 + dataSize);
+  var v = new DataView(buf);
+  var ws = function(o, s) { for (var i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  ws(0,"RIFF"); v.setUint32(4, 36 + dataSize, true); ws(8,"WAVE");
+  ws(12,"fmt "); v.setUint32(16, 16, true); v.setUint16(20, 1, true);
+  v.setUint16(22, numCh, true); v.setUint32(24, sr, true);
+  v.setUint32(28, sr * numCh * 2, true); v.setUint16(32, numCh * 2, true);
+  v.setUint16(34, 16, true); ws(36,"data"); v.setUint32(40, dataSize, true);
+  var off = 44;
+  for (var i = 0; i < numFrames; i++) {
+    for (var ch = 0; ch < numCh; ch++) {
+      var s = Math.max(-1, Math.min(1, audioBuffer.getChannelData(ch)[i]));
+      v.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true); off += 2;
+    }
+  }
+  return buf;
+}
+
+function wavToBase64DataUrl(buffer) {
+  var bytes = new Uint8Array(buffer);
+  var str = ""; var chunk = 0x8000;
+  for (var i = 0; i < bytes.length; i += chunk)
+    str += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+  return "data:audio/wav;base64," + btoa(str);
+}
+
 function usePro() {
   var initPro = (function() {
     try {
@@ -1591,26 +1635,47 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
 
   var handleStemSeparation = useCallback(async function() {
     if (!file) return;
+    var trial = getTrialInfo();
+    if (trial.isTrial && trial.stemsLeft <= 0) {
+      setStemError("You've used all " + TRIAL_STEM_LIMIT + " trial stem separations. Unlimited access starts when your trial converts to a paid subscription.");
+      setStemStatus("error"); return;
+    }
     var MAX_STEM_BYTES = 3 * 1024 * 1024;
-    if (file.size > MAX_STEM_BYTES) {
+    if (!trial.isTrial && file.size > MAX_STEM_BYTES) {
       setStemStatus("toolarge"); return;
     }
     setStemStatus("loading"); setStemOutputs(null); setStemError("");
     var errMsg = "";
     try {
-      var dataUrl = await new Promise(function(resolve, reject) {
-        var rd = new FileReader();
-        rd.onload = function(e) { resolve(e.target.result); };
-        rd.onerror = reject;
-        rd.readAsDataURL(file);
-      });
+      var dataUrl;
+      if (trial.isTrial) {
+        // Truncate to 2 minutes for trial users
+        var ab = await new Promise(function(resolve, reject) {
+          var rd = new FileReader(); rd.onload = function(e) { resolve(e.target.result); }; rd.onerror = reject; rd.readAsArrayBuffer(file);
+        });
+        var tmpCtx = new (window.AudioContext || window.webkitAudioContext)();
+        var decoded = await tmpCtx.decodeAudioData(ab);
+        tmpCtx.close().catch(function(){});
+        var maxSamples = Math.min(decoded.length, TRIAL_MAX_SECONDS * decoded.sampleRate);
+        var numCh = Math.min(decoded.numberOfChannels, 2);
+        var truncBuf = new AudioBuffer({ numberOfChannels: numCh, length: maxSamples, sampleRate: decoded.sampleRate });
+        for (var ch = 0; ch < numCh; ch++) truncBuf.getChannelData(ch).set(decoded.getChannelData(ch).subarray(0, maxSamples));
+        dataUrl = wavToBase64DataUrl(encodeWAV(truncBuf));
+      } else {
+        dataUrl = await new Promise(function(resolve, reject) {
+          var rd = new FileReader(); rd.onload = function(e) { resolve(e.target.result); }; rd.onerror = reject; rd.readAsDataURL(file);
+        });
+      }
       var resp = await fetch("/api/stems", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ audioBase64: dataUrl }),
+        body: JSON.stringify({ audioBase64: dataUrl, deviceId: getDeviceId(), isTrial: trial.isTrial }),
       });
       var data = await resp.json();
       if (!resp.ok) { errMsg = data.error || "Server error"; throw new Error(errMsg); }
+      if (trial.isTrial) {
+        try { localStorage.setItem("mca_trial_stems", String(trial.stemsUsed + 1)); } catch(e) {}
+      }
       var predId = data.predictionId;
       for (var attempt = 0; attempt < 72; attempt++) {
         await new Promise(function(r) { setTimeout(r, 5000); });
@@ -2113,22 +2178,32 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
                 {isPro ? (
                   <div style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:16, padding:"18px", marginBottom:18 }}>
                     <div style={{ fontSize:10, letterSpacing:3, color:"#a78bfa", fontFamily:"monospace", fontWeight:700, marginBottom:12 }}>STEM SEPARATION</div>
-                    {!stemStatus && (
-                      <div>
-                        <div style={{ fontSize:13, color:"#6b7280", fontFamily:"sans-serif", lineHeight:1.6, marginBottom:12 }}>
-                          Split this recording into drums, bass, vocals, and other instruments. Works best on files under 3 minutes.
-                        </div>
-                        {file && file.size > 3*1024*1024 ? (
-                          <div style={{ fontSize:12, color:"#ffb347", fontFamily:"sans-serif" }}>
-                            File is too large for stems. Export a 1-3 minute section as MP3 (128kbps) and re-upload.
+                    {!stemStatus && (function() {
+                      var trial = getTrialInfo();
+                      return (
+                        <div>
+                          <div style={{ fontSize:13, color:"#6b7280", fontFamily:"sans-serif", lineHeight:1.6, marginBottom:12 }}>
+                            Split this recording into drums, bass, vocals, and other instruments.
+                            {trial.isTrial && <span style={{ color:"#a78bfa" }}> Trial: first 2 min of each song.</span>}
                           </div>
-                        ) : (
-                          <button onClick={handleStemSeparation} style={{ background:"linear-gradient(135deg,#7c3aed,#a78bfa)", color:"#fff", border:"none", borderRadius:8, padding:"10px 22px", fontSize:13, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer" }}>
-                            Separate Stems
-                          </button>
-                        )}
-                      </div>
-                    )}
+                          {trial.isTrial && (
+                            <div style={{ fontSize:11, color: trial.stemsLeft > 0 ? "#a78bfa" : "#ff5757", fontFamily:"monospace", fontWeight:700, marginBottom:10, letterSpacing:1 }}>
+                              {trial.stemsLeft > 0 ? trial.stemsLeft + " of " + TRIAL_STEM_LIMIT + " trial separations remaining" : "Trial limit reached — unlimited after trial ends"}
+                            </div>
+                          )}
+                          {!trial.isTrial && file && file.size > 3*1024*1024 ? (
+                            <div style={{ fontSize:12, color:"#ffb347", fontFamily:"sans-serif" }}>
+                              File is too large for stems. Export a 1-3 minute section as MP3 (128kbps) and re-upload.
+                            </div>
+                          ) : (
+                            <button onClick={handleStemSeparation} disabled={trial.isTrial && trial.stemsLeft <= 0}
+                              style={{ background: trial.isTrial && trial.stemsLeft <= 0 ? "#2a2040" : "linear-gradient(135deg,#7c3aed,#a78bfa)", color: trial.isTrial && trial.stemsLeft <= 0 ? "#4a5568" : "#fff", border:"none", borderRadius:8, padding:"10px 22px", fontSize:13, fontFamily:"sans-serif", fontWeight:700, cursor: trial.isTrial && trial.stemsLeft <= 0 ? "not-allowed" : "pointer" }}>
+                              Separate Stems
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })()}
                     {stemStatus === "loading" && (
                       <div style={{ display:"flex", alignItems:"center", gap:14 }}>
                         <div style={{ width:22, height:22, border:"2px solid #2a2040", borderTop:"2px solid #a78bfa", borderRadius:"50%", animation:"spin 0.8s linear infinite", flexShrink:0 }} />

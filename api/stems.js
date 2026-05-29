@@ -13,6 +13,8 @@ export default async function handler(req, res) {
   try {
     var body = req.body;
     var audioBase64 = body.audioBase64;
+    var deviceId = (body.deviceId || "").trim();
+    var isTrial = !!body.isTrial;
 
     if (!audioBase64) {
       return res.status(400).json({ error: "No audio provided" });
@@ -20,6 +22,23 @@ export default async function handler(req, res) {
 
     if (!process.env.REPLICATE_API_TOKEN) {
       return res.status(500).json({ error: "Stem separation not configured" });
+    }
+
+    // Server-side trial stem limit
+    var KV_URL = process.env.KV_REST_API_URL;
+    var KV_TOKEN = process.env.KV_REST_API_TOKEN;
+    if (isTrial && deviceId && KV_URL && KV_TOKEN) {
+      var kvPost = async function(cmd) {
+        var r = await fetch(KV_URL, { method:"POST", headers:{ "Authorization":"Bearer "+KV_TOKEN, "Content-Type":"application/json" }, body:JSON.stringify(cmd) });
+        return r.json();
+      };
+      var countResult = await kvPost(["GET", "stems:" + deviceId]);
+      var count = parseInt(countResult.result || "0", 10);
+      if (count >= 3) {
+        return res.status(403).json({ error: "You've used all 3 trial stem separations. Unlimited access starts when your trial converts to a paid subscription." });
+      }
+      // Increment with 8-day TTL
+      await kvPost(["SET", "stems:" + deviceId, String(count + 1), "EX", 691200]);
     }
 
     // Create prediction using cjwbw/demucs htdemucs model

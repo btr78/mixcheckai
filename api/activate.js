@@ -53,6 +53,8 @@ export default async function handler(req, res) {
     if (stored === "unbound") {
       // First use — bind to this device permanently
       await kvPost(["SET", "code:" + code, "device:" + deviceId]);
+      // Mark this device as in trial period (8-day TTL)
+      await kvPost(["SET", "trial:" + deviceId, "1", "EX", 691200]);
       return res.status(200).json({ ok: true, lifetime: false });
     }
 
