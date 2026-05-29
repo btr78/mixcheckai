@@ -33,18 +33,19 @@ export default async function handler(req, res) {
     return r.json();
   };
 
+  var stripeAuth = "Basic " + Buffer.from(STRIPE_KEY + ":").toString("base64");
+
   try {
     // Idempotent: return existing code if already generated for this session
     var existing = await kvPost(["GET", "session:" + sessionId]);
     if (existing.result && existing.result !== "generating") {
-      return res.status(200).json({ code: existing.result });
+      var trialStored = await kvPost(["GET", "session_trial:" + sessionId]);
+      return res.status(200).json({ code: existing.result, isTrial: trialStored.result !== "0" });
     }
 
     // Verify payment with Stripe
     var stripeResp = await fetch("https://api.stripe.com/v1/checkout/sessions/" + sessionId, {
-      headers: {
-        "Authorization": "Basic " + Buffer.from(STRIPE_KEY + ":").toString("base64"),
-      },
+      headers: { "Authorization": stripeAuth },
     });
 
     if (!stripeResp.ok) {
@@ -53,8 +54,23 @@ export default async function handler(req, res) {
 
     var session = await stripeResp.json();
 
-    if (session.payment_status !== "paid") {
+    if (session.payment_status !== "paid" && session.payment_status !== "no_payment_required") {
       return res.status(400).json({ error: "Payment not completed yet" });
+    }
+
+    // Detect trial vs immediate-pay by checking subscription status
+    var isTrial = true;
+    if (session.subscription) {
+      try {
+        var subResp = await fetch("https://api.stripe.com/v1/subscriptions/" + session.subscription, {
+          headers: { "Authorization": stripeAuth },
+        });
+        if (subResp.ok) {
+          var sub = await subResp.json();
+          var now = Math.floor(Date.now() / 1000);
+          isTrial = sub.status === "trialing" && !!(sub.trial_end && sub.trial_end > now);
+        }
+      } catch(e) {}
     }
 
     // Generate unique code: MCA-XXXX-XXXX (no ambiguous chars)
@@ -68,8 +84,9 @@ export default async function handler(req, res) {
 
     // Store code as unbound (device locked on first activation)
     await kvPost(["SET", "code:" + code, "unbound"]);
-    // Map session → code for 30 days (idempotency + success page lookup)
+    // Map session → code + trial flag for 30 days
     await kvPost(["SET", "session:" + sessionId, code, "EX", 2592000]);
+    await kvPost(["SET", "session_trial:" + sessionId, isTrial ? "1" : "0", "EX", 2592000]);
 
     // Send email via Resend
     var customerEmail = session.customer_details && session.customer_details.email;
@@ -107,7 +124,7 @@ export default async function handler(req, res) {
       }).catch(function(e) { console.error("Resend error:", e); });
     }
 
-    return res.status(200).json({ code: code });
+    return res.status(200).json({ code: code, isTrial: isTrial });
 
   } catch (err) {
     console.error("generate-code error:", err);

@@ -13,6 +13,7 @@ export default async function handler(req, res) {
   var body = req.body || {};
   var code = (body.code || "").trim().toUpperCase();
   var deviceId = (body.deviceId || "").trim();
+  var isTrial = body.isTrial !== false; // default true; false = immediate-pay, skip trial limits
 
   if (!code || !deviceId) {
     return res.status(400).json({ error: "Missing code or device info" });
@@ -53,8 +54,10 @@ export default async function handler(req, res) {
     if (stored === "unbound") {
       // First use — bind to this device permanently
       await kvPost(["SET", "code:" + code, "device:" + deviceId]);
-      // Mark this device as in trial period (8-day TTL)
-      await kvPost(["SET", "trial:" + deviceId, "1", "EX", 691200]);
+      // Only set trial flag for trial subscribers; immediate-pay users get unlimited stems
+      if (isTrial) {
+        await kvPost(["SET", "trial:" + deviceId, "1", "EX", 691200]);
+      }
       return res.status(200).json({ ok: true, lifetime: false });
     }
 

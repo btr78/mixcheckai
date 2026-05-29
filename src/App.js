@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 
 const STRIPE_PAYMENT_LINK = "https://buy.stripe.com/3cIcN6gBO375e6dbQkgbm03";
+const STRIPE_PAYMENT_LINK_NOTRIAL = "REPLACE_WITH_NO_TRIAL_LINK"; // no-trial link — pay $9.99 today, unlimited stems immediately
 
 // ── STRIPE PAYMENT LINKS ──────────────────────────────────────────────────────
 const STRIPE_TEAM_LINK = "https://buy.stripe.com/3cIcN6gBO375e6dbQkgbm03"; // replace with team plan link
@@ -2511,9 +2512,12 @@ function PricingPage({ navigate, isPro, onUnlockClick }) {
                 return <div key={i} style={{ display:"flex", gap:10, marginBottom:11, alignItems:"flex-start" }}><span style={{ fontSize:13 }}>{f.icon}</span><span style={{ fontSize:13, color:"#c8d0e0", fontFamily:"sans-serif", lineHeight:1.5 }}>{f.text}</span></div>;
               })}
               <button onClick={function() { window.open(STRIPE_PAYMENT_LINK,"_blank"); }} style={{ width:"100%", marginTop:24, background:"linear-gradient(135deg,#00e5a0,#00c080)", border:"none", borderRadius:12, padding:"14px", color:"#07090f", fontSize:14, fontFamily:"sans-serif", fontWeight:800, cursor:"pointer" }}>
-                Subscribe - ${price} CAD/mo
+                Start 7-Day Free Trial
               </button>
-              <button onClick={onUnlockClick} style={{ width:"100%", marginTop:10, background:"transparent", border:"1px solid rgba(0,229,160,0.2)", borderRadius:12, padding:"11px", color:"#00e5a0", fontSize:13, fontFamily:"sans-serif", fontWeight:600, cursor:"pointer" }}>
+              <button onClick={function() { window.open(STRIPE_PAYMENT_LINK_NOTRIAL,"_blank"); }} style={{ width:"100%", marginTop:8, background:"transparent", border:"1px solid rgba(0,229,160,0.2)", borderRadius:12, padding:"11px", color:"#00e5a0", fontSize:13, fontFamily:"sans-serif", fontWeight:600, cursor:"pointer" }}>
+                Skip trial — pay ${price} today
+              </button>
+              <button onClick={onUnlockClick} style={{ width:"100%", marginTop:8, background:"transparent", border:"1px solid #1a1f2e", borderRadius:12, padding:"11px", color:"#4a5568", fontSize:12, fontFamily:"sans-serif", fontWeight:600, cursor:"pointer" }}>
                 Already paid? Enter access code
               </button>
             </div>
@@ -2581,12 +2585,12 @@ function SuccessPage({ navigate, isPro, unlockPro }) {
             var actResp = await fetch("/api/activate", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ code: data.code, deviceId: getDeviceId() }),
+              body: JSON.stringify({ code: data.code, deviceId: getDeviceId(), isTrial: data.isTrial !== false }),
             });
             var actData = await actResp.json();
             if (actResp.ok && actData.ok) {
               try {
-                localStorage.setItem("mca_pro_v2", JSON.stringify({ activated:true, lifetime:false, deviceId:getDeviceId(), ts:Date.now() }));
+                localStorage.setItem("mca_pro_v2", JSON.stringify({ activated:true, lifetime:false, deviceId:getDeviceId(), ts: data.isTrial !== false ? Date.now() : 0 }));
               } catch(e) {}
               setActivated(true);
             }
