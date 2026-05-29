@@ -477,6 +477,35 @@ function wavToBase64DataUrl(buffer) {
     str += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
   return "data:audio/wav;base64," + btoa(str);
 }
+// iOS Safari may not expose FileReader as a global — use blob.arrayBuffer() first
+async function readBlobAsArrayBuffer(blob) {
+  if (blob.arrayBuffer) return blob.arrayBuffer();
+  return new Promise(function(resolve, reject) {
+    var FR = window.FileReader;
+    if (!FR) { reject(new Error("FileReader not supported on this browser")); return; }
+    var r = new FR();
+    r.onerror = function() { reject(new Error("Read error")); };
+    r.onload = function(e) { resolve(e.target.result); };
+    r.readAsArrayBuffer(blob);
+  });
+}
+async function readFileAsDataURL(file) {
+  var FR = window.FileReader;
+  if (FR) {
+    return new Promise(function(resolve, reject) {
+      var r = new FR();
+      r.onerror = reject;
+      r.onload = function(e) { resolve(e.target.result); };
+      r.readAsDataURL(file);
+    });
+  }
+  // Fallback for browsers without FileReader global
+  var ab = await readBlobAsArrayBuffer(file);
+  var bytes = new Uint8Array(ab); var binary = ""; var chunk = 0x8000;
+  for (var i = 0; i < bytes.length; i += chunk)
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+  return "data:" + (file.type || "audio/mpeg") + ";base64," + btoa(binary);
+}
 
 function usePro() {
   var initPro = (function() {
@@ -745,99 +774,93 @@ function detectBPM(L, R, sr) {
 
 // ── AUDIO ANALYSIS - slices file BEFORE decoding, never loads full 2hr file ───
 async function decodeSlice(blob) {
-  return new Promise(function(resolve, reject) {
-    var reader = new FileReader();
-    reader.onerror = function() { reject(new Error("Read error")); };
-    reader.onload = async function(e) {
-      try {
-        var AudioCtxClass = window.AudioContext || window.webkitAudioContext;
-        var ctx = new AudioCtxClass();
-        var buf;
-        try { buf = await ctx.decodeAudioData(e.target.result); }
-        catch(de) { ctx.close(); resolve(null); return; }
-        ctx.close();
-        var sr = buf.sampleRate;
-        var numCh = buf.numberOfChannels;
-        var L = buf.getChannelData(0);
-        var R = numCh > 1 ? buf.getChannelData(1) : buf.getChannelData(0);
-        var total = L.length;
-        if (total < 100) { resolve(null); return; }
+  try {
+    var ab = await readBlobAsArrayBuffer(blob);
+    var AudioCtxClass = window.AudioContext || window.webkitAudioContext;
+    var ctx = new AudioCtxClass();
+    var buf;
+    try { buf = await ctx.decodeAudioData(ab); }
+    catch(de) { ctx.close(); return null; }
+    ctx.close();
+    var sr = buf.sampleRate;
+    var numCh = buf.numberOfChannels;
+    var L = buf.getChannelData(0);
+    var R = numCh > 1 ? buf.getChannelData(1) : buf.getChannelData(0);
+    var total = L.length;
+    if (total < 100) { return null; }
 
-        // Loudness
-        var blockLen = Math.floor(sr * 0.4);
-        var hop = Math.floor(blockLen * 0.75);
-        var loudSum = 0; var loudCount = 0;
-        for (var i = 0; i + blockLen <= total; i += hop) {
-          var sq = 0;
-          for (var j = i; j < i + blockLen; j++) sq += L[j]*L[j] + R[j]*R[j];
-          var rv = Math.sqrt(sq / (blockLen * 2));
-          if (rv > 0.0001) { loudSum += rv * rv; loudCount++; }
-        }
-        var avgRMS = loudCount > 0 ? Math.sqrt(loudSum / loudCount) : 0.001;
-        var lufs = Math.round(Math.max(-50, Math.min(-3, 20*Math.log10(avgRMS)-0.691))*10)/10;
+    // Loudness
+    var blockLen = Math.floor(sr * 0.4);
+    var hop = Math.floor(blockLen * 0.75);
+    var loudSum = 0; var loudCount = 0;
+    for (var i = 0; i + blockLen <= total; i += hop) {
+      var sq = 0;
+      for (var j = i; j < i + blockLen; j++) sq += L[j]*L[j] + R[j]*R[j];
+      var rv = Math.sqrt(sq / (blockLen * 2));
+      if (rv > 0.0001) { loudSum += rv * rv; loudCount++; }
+    }
+    var avgRMS = loudCount > 0 ? Math.sqrt(loudSum / loudCount) : 0.001;
+    var lufs = Math.round(Math.max(-50, Math.min(-3, 20*Math.log10(avgRMS)-0.691))*10)/10;
 
-        // True Peak
-        var maxPk = 0;
-        var stride = Math.max(1, Math.floor(total / 100000));
-        for (var i = 0; i < total; i += stride) {
-          var pk = Math.abs(L[i]) > Math.abs(R[i]) ? Math.abs(L[i]) : Math.abs(R[i]);
-          if (pk > maxPk) maxPk = pk;
-        }
-        var peakDb = maxPk > 0 ? Math.round(20*Math.log10(maxPk)*10)/10 : -60;
+    // True Peak
+    var maxPk = 0;
+    var stride = Math.max(1, Math.floor(total / 100000));
+    for (var i = 0; i < total; i += stride) {
+      var pk = Math.abs(L[i]) > Math.abs(R[i]) ? Math.abs(L[i]) : Math.abs(R[i]);
+      if (pk > maxPk) maxPk = pk;
+    }
+    var peakDb = maxPk > 0 ? Math.round(20*Math.log10(maxPk)*10)/10 : -60;
 
-        // Dynamic Range
-        var segLen = Math.floor(sr * 1.0);
-        var segArr = [];
-        for (var i = 0; i + segLen <= total; i += segLen) {
-          var sq = 0;
-          for (var j = i; j < i + segLen; j++) sq += L[j]*L[j];
-          var sr2 = Math.sqrt(sq / segLen);
-          if (sr2 > 0.0001) segArr.push(20*Math.log10(sr2));
-        }
-        segArr.sort(function(a,b){return b-a;});
-        var topN = Math.max(1, Math.floor(segArr.length*0.1));
-        var botStart = Math.max(0, Math.floor(segArr.length*0.9));
-        var tSum = 0; var bSum = 0; var bN = 0;
-        for (var k = 0; k < topN; k++) tSum += segArr[k];
-        for (var k = botStart; k < segArr.length; k++) { bSum += segArr[k]; bN++; }
-        var dynRange = Math.round(Math.max(2, Math.min(40, (tSum/topN) - (bN>0?bSum/bN:(tSum/topN)-10)))*10)/10;
+    // Dynamic Range
+    var segLen = Math.floor(sr * 1.0);
+    var segArr = [];
+    for (var i = 0; i + segLen <= total; i += segLen) {
+      var sq = 0;
+      for (var j = i; j < i + segLen; j++) sq += L[j]*L[j];
+      var sr2 = Math.sqrt(sq / segLen);
+      if (sr2 > 0.0001) segArr.push(20*Math.log10(sr2));
+    }
+    segArr.sort(function(a,b){return b-a;});
+    var topN = Math.max(1, Math.floor(segArr.length*0.1));
+    var botStart = Math.max(0, Math.floor(segArr.length*0.9));
+    var tSum = 0; var bSum = 0; var bN = 0;
+    for (var k = 0; k < topN; k++) tSum += segArr[k];
+    for (var k = botStart; k < segArr.length; k++) { bSum += segArr[k]; bN++; }
+    var dynRange = Math.round(Math.max(2, Math.min(40, (tSum/topN) - (bN>0?bSum/bN:(tSum/topN)-10)))*10)/10;
 
-        // Stereo Width
-        var sLR=0,sL2=0,sR2=0;
-        var st = Math.max(1, Math.floor(total/40000));
-        for (var i = 0; i < total; i += st) { sLR+=L[i]*R[i]; sL2+=L[i]*L[i]; sR2+=R[i]*R[i]; }
-        var cd = Math.sqrt(sL2*sR2);
-        var corr = cd > 0 ? Math.max(-1,Math.min(1,sLR/cd)) : 1;
-        var stereoWidth = Math.round(Math.max(0,Math.min(1,(1-corr)/2))*100);
+    // Stereo Width
+    var sLR=0,sL2=0,sR2=0;
+    var st = Math.max(1, Math.floor(total/40000));
+    for (var i = 0; i < total; i += st) { sLR+=L[i]*R[i]; sL2+=L[i]*L[i]; sR2+=R[i]*R[i]; }
+    var cd = Math.sqrt(sL2*sR2);
+    var corr = cd > 0 ? Math.max(-1,Math.min(1,sLR/cd)) : 1;
+    var stereoWidth = Math.round(Math.max(0,Math.min(1,(1-corr)/2))*100);
 
-        // Freq bands
-        var m0 = Math.floor(total*0.3); var m1 = Math.floor(total*0.7);
-        var gb = function(lo,hi) {
-          var per = Math.max(2,Math.floor(sr/((hi+lo)/2)));
-          var bq=0,bn=0;
-          for (var bi=m0; bi+per<m1; bi+=per) {
-            var bs=0;
-            for (var bj=bi; bj<bi+per; bj++) bs+=Math.abs((L[bj]+R[bj])/2);
-            bq+=(bs/per)*(bs/per); bn++;
-          }
-          return bn>0 ? 20*Math.log10(Math.sqrt(bq/bn)+0.000001) : -60;
-        };
-
-        var mono = new Float32Array(total);
-        for (var mi = 0; mi < total; mi++) mono[mi] = (L[mi] + R[mi]) * 0.5;
-        var detectedKey = detectKey(mono, sr);
-        var detectedBpm = detectBPM(L, R, sr);
-
-        resolve({
-          lufs:lufs, peakDb:peakDb, dynRange:dynRange, stereoWidth:stereoWidth,
-          duration: Math.round(total/sr), sampleRate:sr, channels:numCh,
-          freq:{ sub:gb(20,80), low:gb(80,250), lowMid:gb(250,600), mid:gb(600,2500), highMid:gb(2500,7000), high:gb(7000,14000), air:gb(14000,20000) },
-          detectedKey:detectedKey, bpm:detectedBpm,
-        });
-      } catch(err) { resolve(null); }
+    // Freq bands
+    var m0 = Math.floor(total*0.3); var m1 = Math.floor(total*0.7);
+    var gb = function(lo,hi) {
+      var per = Math.max(2,Math.floor(sr/((hi+lo)/2)));
+      var bq=0,bn=0;
+      for (var bi=m0; bi+per<m1; bi+=per) {
+        var bs=0;
+        for (var bj=bi; bj<bi+per; bj++) bs+=Math.abs((L[bj]+R[bj])/2);
+        bq+=(bs/per)*(bs/per); bn++;
+      }
+      return bn>0 ? 20*Math.log10(Math.sqrt(bq/bn)+0.000001) : -60;
     };
-    reader.readAsArrayBuffer(blob);
-  });
+
+    var mono = new Float32Array(total);
+    for (var mi = 0; mi < total; mi++) mono[mi] = (L[mi] + R[mi]) * 0.5;
+    var detectedKey = detectKey(mono, sr);
+    var detectedBpm = detectBPM(L, R, sr);
+
+    return {
+      lufs:lufs, peakDb:peakDb, dynRange:dynRange, stereoWidth:stereoWidth,
+      duration: Math.round(total/sr), sampleRate:sr, channels:numCh,
+      freq:{ sub:gb(20,80), low:gb(80,250), lowMid:gb(250,600), mid:gb(600,2500), highMid:gb(2500,7000), high:gb(7000,14000), air:gb(14000,20000) },
+      detectedKey:detectedKey, bpm:detectedBpm,
+    };
+  } catch(err) { return null; }
 }
 
 function average(arr) {
@@ -1653,21 +1676,17 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
       var dataUrl;
       if (trial.isTrial) {
         // Truncate to 2 minutes for trial users
-        var ab = await new Promise(function(resolve, reject) {
-          var rd = new FileReader(); rd.onload = function(e) { resolve(e.target.result); }; rd.onerror = reject; rd.readAsArrayBuffer(file);
-        });
+        var ab = await readBlobAsArrayBuffer(file);
         var tmpCtx = new (window.AudioContext || window.webkitAudioContext)();
         var decoded = await tmpCtx.decodeAudioData(ab);
-        tmpCtx.close().catch(function(){});
         var maxSamples = Math.min(decoded.length, TRIAL_MAX_SECONDS * decoded.sampleRate);
         var numCh = Math.min(decoded.numberOfChannels, 2);
-        var truncBuf = new AudioBuffer({ numberOfChannels: numCh, length: maxSamples, sampleRate: decoded.sampleRate });
+        var truncBuf = tmpCtx.createBuffer(numCh, maxSamples, decoded.sampleRate);
+        tmpCtx.close().catch(function(){});
         for (var ch = 0; ch < numCh; ch++) truncBuf.getChannelData(ch).set(decoded.getChannelData(ch).subarray(0, maxSamples));
         dataUrl = wavToBase64DataUrl(encodeWAV(truncBuf));
       } else {
-        dataUrl = await new Promise(function(resolve, reject) {
-          var rd = new FileReader(); rd.onload = function(e) { resolve(e.target.result); }; rd.onerror = reject; rd.readAsDataURL(file);
-        });
+        dataUrl = await readFileAsDataURL(file);
       }
       var resp = await fetch("/api/stems", {
         method: "POST",
