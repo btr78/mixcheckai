@@ -413,34 +413,54 @@ function AIChatPage({ isPro, onUnlockClick }) {
   );
 }
 
-const VALID_CODE_HASHES = [
-  btoa("MIXPRO2026"),
-  btoa("CHURCHPRO1"),
-  btoa("SOUNDTECH1"),
-  btoa("WORSHIP2026"),
-  btoa("STREAMFIX1"),
-  btoa("SUNDAY2026"),
-  btoa("CHURCHAV01"),
-  btoa("MIXCHECK1"),
-  btoa("VOLUNTEER1"),
-  btoa("GUMROAD2026"),
-  btoa("PROVOLUNTEER"),
-  btoa("AUDIOTECH26"),
-  btoa("BLESSED2026"),
-];
+function getDeviceId() {
+  try {
+    var signals = [
+      navigator.userAgent || "",
+      (screen.width||0)+"x"+(screen.height||0)+"x"+(screen.colorDepth||0),
+      navigator.language || "",
+      Intl.DateTimeFormat().resolvedOptions().timeZone || "",
+      (navigator.hardwareConcurrency||0).toString(),
+      navigator.platform || ""
+    ].join("|");
+    var h = 5381;
+    for (var i = 0; i < signals.length; i++) {
+      h = ((h << 5) + h) ^ signals.charCodeAt(i);
+      h = h & 0x7fffffff;
+    }
+    return h.toString(36);
+  } catch(e) { return "unknown"; }
+}
 
 function usePro() {
-  const [isPro, setIsPro] = useState(function() {
-    try { return localStorage.getItem("mca_pro") === "true"; } catch(e) { return false; }
-  });
-  const unlockPro = function(code) {
-    var hashed = btoa(code.trim().toUpperCase());
-    if (VALID_CODE_HASHES.indexOf(hashed) !== -1) {
-      try { localStorage.setItem("mca_pro", "true"); } catch(e) {}
-      setIsPro(true);
-      return true;
+  var initPro = (function() {
+    try {
+      var d = JSON.parse(localStorage.getItem("mca_pro_v2") || "{}");
+      if (!d.activated) return false;
+      if (d.lifetime) return true;
+      return d.deviceId === getDeviceId();
+    } catch(e) { return false; }
+  })();
+  const [isPro, setIsPro] = useState(initPro);
+  const unlockPro = async function(code) {
+    try {
+      var deviceId = getDeviceId();
+      var resp = await fetch("/api/activate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: code.trim().toUpperCase(), deviceId: deviceId }),
+      });
+      var data = await resp.json();
+      if (resp.ok && data.ok) {
+        var saved = { activated: true, lifetime: !!data.lifetime, deviceId: deviceId, ts: Date.now() };
+        try { localStorage.setItem("mca_pro_v2", JSON.stringify(saved)); } catch(e) {}
+        setIsPro(true);
+        return { ok: true };
+      }
+      return { ok: false, error: data.error || "Invalid code" };
+    } catch(e) {
+      return { ok: false, error: "Network error. Check your connection and try again." };
     }
-    return false;
   };
   return { isPro, unlockPro };
 }
@@ -461,18 +481,20 @@ function useRouter() {
 }
 
 function ProUnlockModal({ onClose, onUnlock }) {
-  var codeState = useState("");
-  var code = codeState[0]; var setCode = codeState[1];
-  var errorState = useState("");
-  var error = errorState[0]; var setError = errorState[1];
-  var successState = useState(false);
-  var success = successState[0]; var setSuccess = successState[1];
-  var submit = function() {
-    if (onUnlock(code)) { setSuccess(true); setTimeout(onClose, 2000); }
-    else setError("Invalid code. Check your email or contact hello@mixcheckai.com");
+  var codeState = useState(""); var code = codeState[0]; var setCode = codeState[1];
+  var errorState = useState(""); var error = errorState[0]; var setError = errorState[1];
+  var successState = useState(false); var success = successState[0]; var setSuccess = successState[1];
+  var loadingState = useState(false); var loading = loadingState[0]; var setLoading = loadingState[1];
+  var submit = async function() {
+    if (!code.trim() || loading) return;
+    setLoading(true); setError("");
+    var result = await onUnlock(code);
+    setLoading(false);
+    if (result.ok) { setSuccess(true); setTimeout(onClose, 2200); }
+    else setError(result.error || "Invalid code. Contact hello@mixcheckai.com");
   };
   return (
-    <div style={{ position:"fixed", inset:0, zIndex:200, background:"rgba(0,0,0,0.85)", backdropFilter:"blur(8px)", display:"flex", alignItems:"center", justifyContent:"center", padding:20 }} onClick={onClose}>
+    <div style={{ position:"fixed", inset:0, zIndex:200, background:"rgba(0,0,0,0.85)", backdropFilter:"blur(8px)", display:"flex", alignItems:"center", justifyContent:"center", padding:20 }} onClick={loading ? null : onClose}>
       <div onClick={function(e) { e.stopPropagation(); }} style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:20, padding:"32px 28px", width:"100%", maxWidth:420, position:"relative" }}>
         {success ? (
           <div style={{ textAlign:"center", padding:"20px 0" }}>
@@ -482,18 +504,25 @@ function ProUnlockModal({ onClose, onUnlock }) {
           </div>
         ) : (
           <div>
-            <button onClick={onClose} style={{ position:"absolute", top:16, right:16, background:"none", border:"none", color:"#4a5568", fontSize:20, cursor:"pointer" }}>x</button>
+            {!loading && <button onClick={onClose} style={{ position:"absolute", top:16, right:16, background:"none", border:"none", color:"#4a5568", fontSize:20, cursor:"pointer" }}>x</button>}
             <div style={{ fontSize:10, letterSpacing:4, color:"#00e5a0", fontFamily:"monospace", fontWeight:700, marginBottom:12 }}>UNLOCK PRO</div>
             <div style={{ fontSize:20, fontWeight:900, color:"#fff", marginBottom:8, fontFamily:"sans-serif" }}>Enter your access code</div>
             <div style={{ fontSize:13, color:"#6b7280", fontFamily:"sans-serif", lineHeight:1.6, marginBottom:24 }}>Check your email after payment for your access code.</div>
             <input value={code} onChange={function(e) { setCode(e.target.value.toUpperCase()); setError(""); }}
               onKeyDown={function(e) { if(e.key === "Enter") submit(); }}
-              placeholder="e.g. MIXPRO2026"
-              style={{ width:"100%", background:"#060810", border:"1px solid " + (error ? "#ff5757" : "#1a1f2e"), borderRadius:10, padding:"14px 16px", color:"#e8eaf0", fontSize:15, fontFamily:"monospace", fontWeight:700, letterSpacing:2, outline:"none", marginBottom:error ? 8 : 16, textTransform:"uppercase" }}
+              placeholder="e.g. GMPRO2026"
+              disabled={loading}
+              style={{ width:"100%", background:"#060810", border:"1px solid " + (error ? "#ff5757" : "#1a1f2e"), borderRadius:10, padding:"14px 16px", color:"#e8eaf0", fontSize:15, fontFamily:"monospace", fontWeight:700, letterSpacing:2, outline:"none", marginBottom:error ? 8 : 16, textTransform:"uppercase", opacity: loading ? 0.5 : 1 }}
             />
             {error && <div style={{ fontSize:12, color:"#ff5757", fontFamily:"sans-serif", marginBottom:16 }}>{error}</div>}
-            <button onClick={submit} disabled={!code.trim()} style={{ width:"100%", background: code.trim() ? "#00e5a0" : "#1a1f2e", color: code.trim() ? "#07090f" : "#2a3040", border:"none", borderRadius:10, padding:"14px", fontSize:14, fontFamily:"sans-serif", fontWeight:800, cursor: code.trim() ? "pointer" : "not-allowed", marginBottom:16 }}>
-              Unlock Pro Access
+            <button onClick={submit} disabled={!code.trim() || loading}
+              style={{ width:"100%", background: (code.trim() && !loading) ? "#00e5a0" : "#1a1f2e", color: (code.trim() && !loading) ? "#07090f" : "#2a3040", border:"none", borderRadius:10, padding:"14px", fontSize:14, fontFamily:"sans-serif", fontWeight:800, cursor: (code.trim() && !loading) ? "pointer" : "not-allowed", marginBottom:16, display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
+              {loading ? (
+                <>
+                  <div style={{ width:16, height:16, border:"2px solid #2a3040", borderTop:"2px solid #00e5a0", borderRadius:"50%", animation:"spin 0.7s linear infinite" }} />
+                  Verifying...
+                </>
+              ) : "Unlock Pro Access"}
             </button>
             <div style={{ textAlign:"center", fontSize:12, color:"#4a5568", fontFamily:"sans-serif" }}>
               No code yet? <a href={STRIPE_PAYMENT_LINK} target="_blank" rel="noopener noreferrer" style={{ color:"#00e5a0", textDecoration:"none" }}>Subscribe $9.99 CAD/mo</a>
