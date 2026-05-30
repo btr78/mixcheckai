@@ -1,4 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { ClerkProvider, SignInButton, SignedIn, SignedOut, UserButton, useUser } from "@clerk/clerk-react";
+
+var CLERK_KEY = process.env.REACT_APP_CLERK_PUBLISHABLE_KEY || "";
 
 const STRIPE_PAYMENT_LINK = "https://buy.stripe.com/3cIcN6gBO375e6dbQkgbm03";
 const STRIPE_PAYMENT_LINK_NOTRIAL = "https://buy.stripe.com/dRmbJ271e9vte6d5rWgbm04"; // no-trial link — pay $9.99 today, unlimited stems immediately
@@ -167,13 +170,30 @@ function SundayChecklist() {
 }
 
 // ── SESSION HISTORY PAGE ──────────────────────────────────────────────────────
-function HistoryPage({ navigate }) {
+function HistoryPage({ navigate, user }) {
   var histState = useState(loadHistory);
   var history = histState[0]; var setHistory = histState[1];
+  var cloudState = useState(false); var cloudLoaded = cloudState[0]; var setCloudLoaded = cloudState[1];
+
+  useEffect(function() {
+    if (!user || !user.id) return;
+    fetch("/api/history?userId=" + encodeURIComponent(user.id))
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d.history && d.history.length > 0) {
+          setHistory(d.history);
+          setCloudLoaded(true);
+        }
+      })
+      .catch(function() {});
+  }, [user]);
 
   var handleClear = function() {
     clearHistory();
     setHistory([]);
+    if (user && user.id) {
+      fetch("/api/history", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ userId:user.id, entry:null, clear:true }) }).catch(function(){});
+    }
   };
 
   if (history.length === 0) {
@@ -196,6 +216,9 @@ function HistoryPage({ navigate }) {
           <div>
             <div style={{ fontSize:10, letterSpacing:4, color:"#00e5a0", fontFamily:"monospace", fontWeight:700, marginBottom:10 }}>SESSION HISTORY</div>
             <h1 style={{ fontSize:"clamp(20px,4vw,32px)", fontWeight:900, margin:0, letterSpacing:-1.5, color:"#fff" }}>Your Mix Progress</h1>
+            {cloudLoaded && <div style={{ fontSize:11, color:"#4a7cff", fontFamily:"sans-serif", marginTop:6 }}>☁️ Synced from your account</div>}
+            {user && !cloudLoaded && <div style={{ fontSize:11, color:"#4a5568", fontFamily:"sans-serif", marginTop:6 }}>Loading cloud history…</div>}
+            {!user && <div style={{ fontSize:11, color:"#4a5568", fontFamily:"sans-serif", marginTop:6 }}>Sign in to sync history across devices</div>}
           </div>
           <button onClick={handleClear} style={{ background:"transparent", border:"1px solid #1a1f2e", borderRadius:8, padding:"8px 16px", color:"#4a5568", fontSize:12, fontFamily:"sans-serif", cursor:"pointer" }}>Clear History</button>
         </div>
@@ -665,6 +688,18 @@ function Nav({ navigate, page, isPro, onUnlockClick, appMode, setAppMode }) {
             </div>
           ) : (
             <button onClick={onUnlockClick} style={{ background:"#00e5a0", color:"#07090f", border:"none", borderRadius:8, padding:"8px 16px", fontSize:13, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer", marginLeft:4 }}>Get Pro</button>
+          )}
+          {CLERK_KEY && (
+            <div style={{ marginLeft:4 }}>
+              <SignedOut>
+                <SignInButton mode="modal">
+                  <button style={{ background:"transparent", border:"1px solid #2a3040", borderRadius:8, padding:"6px 12px", fontSize:12, fontFamily:"sans-serif", fontWeight:600, cursor:"pointer", color:"#9ca3af" }}>Sign In</button>
+                </SignInButton>
+              </SignedOut>
+              <SignedIn>
+                <UserButton appearance={{ elements: { avatarBox:{ width:30, height:30 } } }} />
+              </SignedIn>
+            </div>
           )}
         </div>
       </div>
@@ -1571,7 +1606,7 @@ function CheatSheetPage({ mixer, instrument, isPro, onUnlockClick, onReset }) {
   );
 }
 
-function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
+function AnalyzePage({ navigate, isPro, onUnlockClick, appMode, user }) {
   var stepState = useState(1); var step = stepState[0]; var setStep = stepState[1];
   var mixerState = useState(null); var mixer = mixerState[0]; var setMixer = mixerState[1];
   var customState = useState(""); var customMixer = customState[0]; var setCustomMixer = customState[1];
@@ -1639,11 +1674,15 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
       var recs    = generateRecs(lufsVal, peakVal, dynVal, swVal, m.freq || null);
       var score   = calcMixScore(lufsVal, peakVal, dynVal, swVal);
       var finalR  = Object.assign({}, m, { recs:recs, mixer:selectedMixer, score:score, lufs:lufsVal, peakDb:peakVal, dynRange:dynVal, stereoWidth:swVal });
-      saveToHistory({
+      var histEntry = {
         fileName: f.name, date: new Date().toISOString(),
         score: score, lufs: lufsVal, peakDb: peakVal, dynRange: dynVal, stereoWidth: swVal,
         mixer: selectedMixer ? selectedMixer.name : "", mode: appMode || "church",
-      });
+      };
+      saveToHistory(histEntry);
+      if (user && user.id) {
+        fetch("/api/history", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ userId:user.id, entry:histEntry }) }).catch(function(){});
+      }
       if (!isPro) incrementUsage();
       setResults(finalR);
       setStep(4);
@@ -3160,7 +3199,7 @@ function AboutPage({ navigate, onUnlockClick, isPro }) {
   );
 }
 
-export default function App() {
+function AppCore({ user }) {
   var routerResult = useRouter();
   var page = routerResult.page; var navigate = routerResult.navigate;
   var proResult = usePro();
@@ -3169,7 +3208,7 @@ export default function App() {
   var modeState = useState("church"); var appMode = modeState[0]; var setAppMode = modeState[1];
 
   var renderPage = function() {
-    var props = { navigate:navigate, isPro:isPro, onUnlockClick:function() { setShowUnlock(true); }, appMode:appMode, unlockPro:unlockPro };
+    var props = { navigate:navigate, isPro:isPro, onUnlockClick:function() { setShowUnlock(true); }, appMode:appMode, unlockPro:unlockPro, user:user };
     if (page === "home")      return React.createElement(HomePage, props);
     if (page === "analyze")   return React.createElement(AnalyzePage, props);
     if (page === "pricing")   return React.createElement(PricingPage, props);
@@ -3188,5 +3227,19 @@ export default function App() {
       {page !== "success" && <Footer navigate={navigate} />}
       {showUnlock && <ProUnlockModal onClose={function() { setShowUnlock(false); }} onUnlock={unlockPro} />}
     </div>
+  );
+}
+
+function AppWithClerk() {
+  var clerkResult = useUser();
+  return React.createElement(AppCore, { user: clerkResult.user || null });
+}
+
+export default function App() {
+  if (!CLERK_KEY) {
+    return React.createElement(AppCore, { user: null });
+  }
+  return React.createElement(ClerkProvider, { publishableKey: CLERK_KEY },
+    React.createElement(AppWithClerk, null)
   );
 }
