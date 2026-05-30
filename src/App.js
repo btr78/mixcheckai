@@ -3239,7 +3239,36 @@ export default function App() {
   if (!CLERK_KEY) {
     return React.createElement(AppCore, { user: null });
   }
-  return React.createElement(ClerkProvider, { publishableKey: CLERK_KEY },
+  var clerkAppearance = {
+    variables: {
+      colorPrimary: "#00e5a0",
+      colorBackground: "#0d1017",
+      colorText: "#e8eaf0",
+      colorTextSecondary: "#9ca3af",
+      colorInputBackground: "#060810",
+      colorInputText: "#e8eaf0",
+      colorNeutral: "#4a5568",
+      borderRadius: "10px",
+      fontFamily: "'DM Sans', sans-serif",
+      fontSize: "15px",
+    },
+    elements: {
+      card: { boxShadow: "0 8px 48px rgba(0,0,0,0.7)", border: "1px solid #1a1f2e" },
+      modalBackdrop: { backdropFilter: "blur(8px)", background: "rgba(0,0,0,0.6)" },
+      formButtonPrimary: { background: "#00e5a0", color: "#07090f", fontWeight: 700 },
+      footerActionLink: { color: "#00e5a0" },
+      identityPreviewEditButton: { color: "#00e5a0" },
+      headerTitle: { color: "#ffffff" },
+      headerSubtitle: { color: "#6b7280" },
+      dividerLine: { background: "#1a1f2e" },
+      dividerText: { color: "#4a5568" },
+      socialButtonsBlockButton: { border: "1px solid #1a1f2e", background: "#0d1017", color: "#e8eaf0" },
+      socialButtonsBlockButtonText: { color: "#e8eaf0" },
+      formFieldLabel: { color: "#9ca3af" },
+      formFieldInput: { border: "1px solid #1a1f2e" },
+    },
+  };
+  return React.createElement(ClerkProvider, { publishableKey: CLERK_KEY, appearance: clerkAppearance },
     React.createElement(AppWithClerk, null)
   );
 }
