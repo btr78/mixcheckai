@@ -1587,10 +1587,9 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
   var stemStatusState = useState(null); var stemStatus = stemStatusState[0]; var setStemStatus = stemStatusState[1];
   var stemOutputsState = useState(null); var stemOutputs = stemOutputsState[0]; var setStemOutputs = stemOutputsState[1];
   var stemErrorState = useState(""); var stemError = stemErrorState[0]; var setStemError = stemErrorState[1];
-  var stemMutedState = useState({ drums:false, bass:false, vocals:false, other:false });
+  var stemMutedState = useState({ drums:false, bass:false, vocals:false, guitar:false, piano:false, other:false });
   var stemMuted = stemMutedState[0]; var setStemMuted = stemMutedState[1];
-  var stemVolumesState = useState({ drums:1, bass:1, vocals:1, other:1 });
-  var stemVolumes = stemVolumesState[0]; var setStemVolumes = stemVolumesState[1];
+  var stemFaderRefs = useRef({});
   var stemSliceMinsState = useState(null); var stemSliceMins = stemSliceMinsState[0]; var setStemSliceMins = stemSliceMinsState[1];
   var stemPlayingState = useState(false); var stemPlaying = stemPlayingState[0]; var setStemPlaying = stemPlayingState[1];
   var stemAudioRefs = useRef({});
@@ -1849,10 +1848,14 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
     a.muted = next[key];
     setStemMuted(next);
   };
-  var handleStemVolume = function(key, val) {
+  var handleStemVolume = function(key, val, inputEl, col) {
     var a = stemAudioRefs.current[key];
     if (a) a.volume = val;
-    setStemVolumes(function(prev) { var n = Object.assign({}, prev); n[key] = val; return n; });
+    if (inputEl) {
+      inputEl.style.background = "linear-gradient(to right," + col + " " + Math.round(val*100) + "%,#1a1f2e " + Math.round(val*100) + "%)";
+      var pct = inputEl.parentNode && inputEl.parentNode.querySelector(".vol-pct");
+      if (pct) pct.textContent = Math.round(val * 100) + "%";
+    }
   };
 
   return (
@@ -2325,11 +2328,11 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
                         <div style={{ fontSize:12, color:"#00e5a0", fontFamily:"sans-serif", fontWeight:700, marginBottom:14 }}>
                           Stems ready — mute any track to practice your part:
                         </div>
-                        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(148px,1fr))", gap:10, marginBottom:14 }}>
-                          {["drums","bass","vocals","other"].filter(function(k){ return stemOutputs[k]; }).map(function(k) {
-                            var LABELS = { drums:"Drums", bass:"Bass", vocals:"Vocals", other:"Other / Keys" };
-                            var ICONS  = { drums:"🥁", bass:"🎸", vocals:"🎤", other:"🎹" };
-                            var COLORS = { drums:"#ff5757", bass:"#4a7cff", vocals:"#00e5a0", other:"#ffb347" };
+                        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))", gap:10, marginBottom:14 }}>
+                          {["vocals","drums","bass","guitar","piano","other"].filter(function(k){ return stemOutputs[k]; }).map(function(k) {
+                            var LABELS = { drums:"Drums", bass:"Bass", vocals:"Vocals", guitar:"Guitar", piano:"Keys / Piano", other:"Other" };
+                            var ICONS  = { drums:"🥁", bass:"🎸", vocals:"🎤", guitar:"🎵", piano:"🎹", other:"🎶" };
+                            var COLORS = { drums:"#ff5757", bass:"#4a7cff", vocals:"#00e5a0", guitar:"#f59e0b", piano:"#a78bfa", other:"#ffb347" };
                             var isMuted = !!stemMuted[k];
                             var col = COLORS[k];
                             return (
@@ -2350,23 +2353,21 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
                                   style={{ width:"100%", border:"1px solid "+(isMuted?"#2a3040":col+"55"), borderRadius:7, padding:"8px 6px", fontSize:11, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer", background: isMuted?"transparent":col+"18", color: isMuted?"#4a5568":col, transition:"all 0.15s", letterSpacing:0.5 }}>
                                   {isMuted ? "MUTED — tap to unmute" : "MUTE"}
                                 </button>
-                                {/* Volume fader */}
+                                {/* Volume fader — uncontrolled for instant response */}
                                 <div style={{ marginTop:10, opacity: isMuted ? 0.3 : 1, transition:"opacity 0.15s" }}>
                                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:5 }}>
                                     <span style={{ fontSize:9, color: col, fontFamily:"monospace", fontWeight:700, letterSpacing:2 }}>VOL</span>
-                                    <span style={{ fontSize:9, color:"#4a5568", fontFamily:"monospace", fontWeight:600 }}>
-                                      {Math.round((stemVolumes[k] !== undefined ? stemVolumes[k] : 1) * 100)}%
-                                    </span>
+                                    <span className="vol-pct" style={{ fontSize:9, color:"#4a5568", fontFamily:"monospace", fontWeight:600 }}>100%</span>
                                   </div>
                                   <input
                                     type="range" className="stem-fader"
                                     min="0" max="1" step="0.01"
-                                    value={stemVolumes[k] !== undefined ? stemVolumes[k] : 1}
-                                    onInput={function(e) { handleStemVolume(k, parseFloat(e.target.value)); }}
-                                    onChange={function(e) { handleStemVolume(k, parseFloat(e.target.value)); }}
+                                    defaultValue={1}
+                                    ref={function(el) { if (el) stemFaderRefs.current[k] = el; }}
+                                    onInput={function(e) { handleStemVolume(k, parseFloat(e.target.value), e.target, col); }}
                                     style={{
                                       "--fc": col,
-                                      background: "linear-gradient(to right," + col + " " + Math.round((stemVolumes[k]||1)*100) + "%,#1a1f2e " + Math.round((stemVolumes[k]||1)*100) + "%)",
+                                      background: "linear-gradient(to right," + col + " 100%,#1a1f2e 100%)",
                                     }}
                                   />
                                 </div>
@@ -2407,7 +2408,7 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode }) {
                               ■  Stop
                             </button>
                           )}
-                          <button onClick={function(){handleStemStop();setStemStatus(null);setStemOutputs(null);setStemMuted({drums:false,bass:false,vocals:false,other:false});setStemVolumes({drums:1,bass:1,vocals:1,other:1});setStemSliceMins(null);}}
+                          <button onClick={function(){handleStemStop();setStemStatus(null);setStemOutputs(null);setStemMuted({drums:false,bass:false,vocals:false,guitar:false,piano:false,other:false});Object.values(stemFaderRefs.current).forEach(function(el){if(el){el.value=1;el.style.background="";var p=el.parentNode&&el.parentNode.querySelector(".vol-pct");if(p)p.textContent="100%";}});stemFaderRefs.current={};setStemSliceMins(null);}}
                             style={{ background:"transparent", border:"1px solid #1a1f2e", borderRadius:6, padding:"5px 12px", color:"#4a5568", fontSize:11, cursor:"pointer", fontFamily:"sans-serif", marginLeft:"auto" }}>
                             Separate Another
                           </button>
