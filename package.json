@@ -4,6 +4,7 @@
   "private": true,
   "dependencies": {
     "@clerk/clerk-react": "^5.61.8",
+    "@clerk/react": "^6.7.2",
     "react": "^18.1.0",
     "react-dom": "^18.1.0"
   },
