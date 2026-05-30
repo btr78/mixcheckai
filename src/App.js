@@ -174,6 +174,16 @@ function HistoryPage({ navigate, user }) {
   var histState = useState(loadHistory);
   var history = histState[0]; var setHistory = histState[1];
   var cloudState = useState(false); var cloudLoaded = cloudState[0]; var setCloudLoaded = cloudState[1];
+  var tabState = useState("scores"); var activeTab = tabState[0]; var setActiveTab = tabState[1];
+  var savedStemsState = useState([]); var savedStems = savedStemsState[0]; var setSavedStems = savedStemsState[1];
+
+  useEffect(function() {
+    if (!user || !user.id) return;
+    fetch("/api/saved-stems?userId=" + encodeURIComponent(user.id))
+      .then(function(r) { return r.json(); })
+      .then(function(d) { if (d.stems) setSavedStems(d.stems); })
+      .catch(function() {});
+  }, [user]);
 
   useEffect(function() {
     if (!user || !user.id) return;
@@ -217,13 +227,57 @@ function HistoryPage({ navigate, user }) {
             <div style={{ fontSize:10, letterSpacing:4, color:"#00e5a0", fontFamily:"monospace", fontWeight:700, marginBottom:10 }}>SESSION HISTORY</div>
             <h1 style={{ fontSize:"clamp(20px,4vw,32px)", fontWeight:900, margin:0, letterSpacing:-1.5, color:"#fff" }}>Your Mix Progress</h1>
             {cloudLoaded && <div style={{ fontSize:11, color:"#4a7cff", fontFamily:"sans-serif", marginTop:6 }}>☁️ Synced from your account</div>}
-            {user && !cloudLoaded && <div style={{ fontSize:11, color:"#4a5568", fontFamily:"sans-serif", marginTop:6 }}>Loading cloud history…</div>}
             {!user && <div style={{ fontSize:11, color:"#4a5568", fontFamily:"sans-serif", marginTop:6 }}>Sign in to sync history across devices</div>}
+          </div>
+          <div style={{ display:"flex", gap:4, alignItems:"center" }}>
+            <button onClick={function(){setActiveTab("scores");}} style={{ background:activeTab==="scores"?"rgba(0,229,160,0.12)":"transparent", border:activeTab==="scores"?"1px solid rgba(0,229,160,0.3)":"1px solid #1a1f2e", borderRadius:8, padding:"7px 14px", fontSize:12, fontFamily:"sans-serif", fontWeight:600, color:activeTab==="scores"?"#00e5a0":"#6b7280", cursor:"pointer" }}>Mix Scores</button>
+            <button onClick={function(){setActiveTab("stems");}} style={{ background:activeTab==="stems"?"rgba(167,139,250,0.12)":"transparent", border:activeTab==="stems"?"1px solid rgba(167,139,250,0.3)":"1px solid #1a1f2e", borderRadius:8, padding:"7px 14px", fontSize:12, fontFamily:"sans-serif", fontWeight:600, color:activeTab==="stems"?"#a78bfa":"#6b7280", cursor:"pointer" }}>
+              Saved Stems {savedStems.length > 0 && <span style={{ background:"rgba(167,139,250,0.25)", borderRadius:99, padding:"1px 6px", fontSize:10, marginLeft:4 }}>{savedStems.length}</span>}
+            </button>
           </div>
           <button onClick={handleClear} style={{ background:"transparent", border:"1px solid #1a1f2e", borderRadius:8, padding:"8px 16px", color:"#4a5568", fontSize:12, fontFamily:"sans-serif", cursor:"pointer" }}>Clear History</button>
         </div>
 
-        <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+        {activeTab === "stems" && (
+          <div>
+            {!user && <div style={{ textAlign:"center", padding:"40px 20px", color:"#6b7280", fontFamily:"sans-serif", fontSize:14 }}>Sign in to see your saved stems.</div>}
+            {user && savedStems.length === 0 && <div style={{ textAlign:"center", padding:"40px 20px" }}><div style={{ fontSize:32, marginBottom:12 }}>🎵</div><div style={{ fontSize:14, color:"#6b7280", fontFamily:"sans-serif" }}>No saved stems yet. Separate a track while signed in and it'll appear here.</div></div>}
+            <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+              {savedStems.map(function(entry, i) {
+                var TRACK_COLORS = { vocals:"#00e5a0", drums:"#ff5757", bass:"#4a7cff", guitar:"#f59e0b", piano:"#a78bfa", other:"#ffb347" };
+                var TRACK_ICONS  = { vocals:"🎤", drums:"🥁", bass:"🎸", guitar:"🎵", piano:"🎹", other:"🎶" };
+                var date = entry.date ? new Date(entry.date).toLocaleDateString() : "";
+                return (
+                  <div key={i} style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:14, padding:"18px 20px" }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14, flexWrap:"wrap", gap:8 }}>
+                      <div>
+                        <div style={{ fontSize:13, fontWeight:700, color:"#e8eaf0", fontFamily:"sans-serif", marginBottom:3 }}>{entry.fileName}</div>
+                        <div style={{ fontSize:11, color:"#4a5568", fontFamily:"sans-serif" }}>{date}</div>
+                      </div>
+                      <div style={{ fontSize:10, color:"#a78bfa", fontFamily:"monospace", fontWeight:700 }}>☁️ SAVED</div>
+                    </div>
+                    <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+                      {Object.entries(entry.stems || {}).map(function(kv) {
+                        var track = kv[0]; var url = kv[1];
+                        var col = TRACK_COLORS[track] || "#6b7280";
+                        return (
+                          <a key={track} href={url} download={track + ".mp3"} target="_blank" rel="noopener noreferrer"
+                            style={{ display:"flex", alignItems:"center", gap:6, background:"rgba(255,255,255,0.04)", border:"1px solid "+col+"33", borderRadius:8, padding:"8px 12px", textDecoration:"none", color:col, fontSize:12, fontFamily:"sans-serif", fontWeight:600 }}>
+                            <span>{TRACK_ICONS[track] || "🎵"}</span>
+                            <span>{track.charAt(0).toUpperCase()+track.slice(1)}</span>
+                            <span style={{ fontSize:10, color:"#4a5568" }}>↓</span>
+                          </a>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {activeTab === "scores" && <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
           {history.map(function(entry, i) {
             var scoreInfo = getScoreLabel(entry.score || 0);
             var date = entry.date ? new Date(entry.date).toLocaleDateString() : "Unknown date";
@@ -257,7 +311,7 @@ function HistoryPage({ navigate, user }) {
               </div>
             );
           })}
-        </div>
+        </div>}
       </div>
     </div>
   );
@@ -1625,6 +1679,9 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode, user }) {
   var stemMutedState = useState({ drums:false, bass:false, vocals:false, guitar:false, piano:false, other:false });
   var stemMuted = stemMutedState[0]; var setStemMuted = stemMutedState[1];
   var stemFaderRefs = useRef({});
+  var userRef = useRef(user);
+  useEffect(function() { userRef.current = user; }, [user]);
+  var stemSaveState = useState(null); var stemSaveStatus = stemSaveState[0]; var setStemSaveStatus = stemSaveState[1];
   var stemSliceMinsState = useState(null); var stemSliceMins = stemSliceMinsState[0]; var setStemSliceMins = stemSliceMinsState[1];
   var stemPlayingState = useState(false); var stemPlaying = stemPlayingState[0]; var setStemPlaying = stemPlayingState[1];
   var stemAudioRefs = useRef({});
@@ -1762,7 +1819,22 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode, user }) {
         var sr2 = await fetch("/api/stems-status?id=" + predId);
         if (!sr2.ok) continue;
         var sd = await sr2.json();
-        if (sd.status === "succeeded") { setStemOutputs(sd.output); setStemStatus("done"); return; }
+        if (sd.status === "succeeded") {
+          setStemOutputs(sd.output);
+          setStemStatus("done");
+          var currentUser = userRef.current;
+          if (currentUser && currentUser.id && sd.output) {
+            setStemSaveStatus("saving");
+            fetch("/api/save-stems", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ userId: currentUser.id, stemUrls: sd.output, fileName: file ? file.name : "Recording", date: new Date().toISOString() }),
+            }).then(function(r) { return r.json(); })
+              .then(function(d) { setStemSaveStatus(d.ok ? "saved" : "error"); })
+              .catch(function() { setStemSaveStatus("error"); });
+          }
+          return;
+        }
         if (sd.status === "failed" || sd.status === "canceled") { errMsg = "Stem separation failed on server"; throw new Error(errMsg); }
       }
       errMsg = "Timed out — try a shorter file (under 3 min)";
@@ -2364,8 +2436,11 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode, user }) {
                     )}
                     {stemStatus === "done" && stemOutputs && (
                       <div>
-                        <div style={{ fontSize:12, color:"#00e5a0", fontFamily:"sans-serif", fontWeight:700, marginBottom:14 }}>
-                          Stems ready — mute any track to practice your part:
+                        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14, flexWrap:"wrap", gap:8 }}>
+                          <div style={{ fontSize:12, color:"#00e5a0", fontFamily:"sans-serif", fontWeight:700 }}>Stems ready — mute any track to practice your part:</div>
+                          {stemSaveStatus === "saving" && <div style={{ fontSize:11, color:"#6b7280", fontFamily:"sans-serif" }}>☁️ Saving to your account…</div>}
+                          {stemSaveStatus === "saved"  && <div style={{ fontSize:11, color:"#00e5a0", fontFamily:"sans-serif" }}>☁️ Saved to your account ✓</div>}
+                          {stemSaveStatus === "error"  && <div style={{ fontSize:11, color:"#ff5757", fontFamily:"sans-serif" }}>⚠ Could not save (Blob not set up)</div>}
                         </div>
                         <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))", gap:10, marginBottom:14 }}>
                           {["vocals","drums","bass","guitar","piano","other"].filter(function(k){ return stemOutputs[k]; }).map(function(k) {
@@ -2740,7 +2815,7 @@ function HomePage({ navigate, isPro, onUnlockClick }) {
             <button onClick={function() { navigate("analyze"); }} style={{ background:"#00e5a0", color:"#07090f", border:"none", borderRadius:10, padding:"15px 32px", fontSize:16, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer", boxShadow:"0 0 32px rgba(0,229,160,0.25)" }}>Analyze Free</button>
             {!isPro && <button onClick={onUnlockClick} style={{ background:"transparent", color:"#9ca3af", border:"1px solid #1e2535", borderRadius:10, padding:"15px 32px", fontSize:16, fontFamily:"sans-serif", fontWeight:600, cursor:"pointer" }}>Unlock Pro</button>}
           </div>
-          <p style={{ fontSize:12, color:"#374151", fontFamily:"sans-serif", marginTop:18 }}>7-day free trial included with Pro · Cancel anytime</p>
+          {!isPro && <p style={{ fontSize:12, color:"#374151", fontFamily:"sans-serif", marginTop:18 }}>7-day free trial included with Pro · Cancel anytime</p>}
         </div>
       </section>
     </div>
@@ -2829,15 +2904,27 @@ function PricingPage({ navigate, isPro, onUnlockClick }) {
               {PRO.map(function(f,i) {
                 return <div key={i} style={{ display:"flex", gap:10, marginBottom:11, alignItems:"flex-start" }}><span style={{ fontSize:13 }}>{f.icon}</span><span style={{ fontSize:13, color:"#c8d0e0", fontFamily:"sans-serif", lineHeight:1.5 }}>{f.text}</span></div>;
               })}
-              <button onClick={function() { window.open(STRIPE_PAYMENT_LINK,"_blank"); }} style={{ width:"100%", marginTop:24, background:"linear-gradient(135deg,#00e5a0,#00c080)", border:"none", borderRadius:12, padding:"14px", color:"#07090f", fontSize:14, fontFamily:"sans-serif", fontWeight:800, cursor:"pointer" }}>
-                Start 7-Day Free Trial
-              </button>
-              <button onClick={function() { window.open(STRIPE_PAYMENT_LINK_NOTRIAL,"_blank"); }} style={{ width:"100%", marginTop:8, background:"transparent", border:"1px solid rgba(0,229,160,0.2)", borderRadius:12, padding:"11px", color:"#00e5a0", fontSize:13, fontFamily:"sans-serif", fontWeight:600, cursor:"pointer" }}>
-                Skip trial — pay ${price} today
-              </button>
-              <button onClick={onUnlockClick} style={{ width:"100%", marginTop:8, background:"transparent", border:"1px solid #1a1f2e", borderRadius:12, padding:"11px", color:"#4a5568", fontSize:12, fontFamily:"sans-serif", fontWeight:600, cursor:"pointer" }}>
-                Already paid? Enter access code
-              </button>
+              {isPro ? (
+                <div style={{ marginTop:24, background:"rgba(0,229,160,0.08)", border:"1px solid rgba(0,229,160,0.3)", borderRadius:12, padding:"16px", textAlign:"center" }}>
+                  <div style={{ fontSize:22, marginBottom:6 }}>✓</div>
+                  <div style={{ fontSize:14, color:"#00e5a0", fontWeight:700, fontFamily:"sans-serif", marginBottom:4 }}>You're on Pro</div>
+                  <div style={{ fontSize:12, color:"#6b7280", fontFamily:"sans-serif" }}>
+                    {(function() { var t = getTrialInfo(); return t.isTrial ? "Trial active — " + t.stemsLeft + " trial stem" + (t.stemsLeft !== 1 ? "s" : "") + " left" : "Active subscription"; })()}
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <button onClick={function() { window.open(STRIPE_PAYMENT_LINK,"_blank"); }} style={{ width:"100%", marginTop:24, background:"linear-gradient(135deg,#00e5a0,#00c080)", border:"none", borderRadius:12, padding:"14px", color:"#07090f", fontSize:14, fontFamily:"sans-serif", fontWeight:800, cursor:"pointer" }}>
+                    Start 7-Day Free Trial
+                  </button>
+                  <button onClick={function() { window.open(STRIPE_PAYMENT_LINK_NOTRIAL,"_blank"); }} style={{ width:"100%", marginTop:8, background:"transparent", border:"1px solid rgba(0,229,160,0.2)", borderRadius:12, padding:"11px", color:"#00e5a0", fontSize:13, fontFamily:"sans-serif", fontWeight:600, cursor:"pointer" }}>
+                    Skip trial — pay ${price} today
+                  </button>
+                  <button onClick={onUnlockClick} style={{ width:"100%", marginTop:8, background:"transparent", border:"1px solid #1a1f2e", borderRadius:12, padding:"11px", color:"#4a5568", fontSize:12, fontFamily:"sans-serif", fontWeight:600, cursor:"pointer" }}>
+                    Already paid? Enter access code
+                  </button>
+                </div>
+              )}
             </div>
             {/* Team Plan */}
             <div style={{ background:"linear-gradient(160deg,rgba(74,124,255,0.07),rgba(74,124,255,0.02))", border:"1.5px solid rgba(74,124,255,0.3)", borderRadius:20, padding:"30px 26px", position:"relative" }}>
