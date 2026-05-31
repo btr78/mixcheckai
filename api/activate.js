@@ -8,17 +8,19 @@ export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
   if (req.method === "OPTIONS") return res.status(200).end();
-  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  var body = req.body || {};
-
-  // ── Admin: seed a new trial code ────────────────────────────────────────────
-  if (body._action === "seed") {
-    var masterCheck = (process.env.MASTER_PRO_CODE || "").trim();
-    if (!masterCheck || (body.secret || "").trim() !== masterCheck) return res.status(403).json({ error: "Forbidden" });
-    var seedCode = (body.code || "").trim().toUpperCase();
-    var seedDays = Math.max(1, parseInt(body.days || "3", 10));
+  // ── Admin: seed a new code via GET or POST ───────────────────────────────────
+  var isSeedGet = req.method === "GET" && req.query._action === "seed";
+  var isSeedPost = req.method === "POST" && (req.body || {})._action === "seed";
+  if (isSeedGet || isSeedPost) {
+    var seedParams = isSeedGet ? req.query : (req.body || {});
+    var masterCheck = (process.env.MASTER_PRO_CODE || "").trim().toUpperCase();
+    var givenSecret = (seedParams.secret || "").trim().toUpperCase();
+    if (!masterCheck || givenSecret !== masterCheck) return res.status(403).json({ error: "Forbidden — wrong secret" });
+    var seedCode = (seedParams.code || "").trim().toUpperCase();
+    var seedDays = Math.max(1, parseInt(seedParams.days || "365", 10));
     var seedSecs = seedDays * 86400;
+    var isLifetime = seedParams.lifetime === "1" || seedParams.lifetime === "true";
     if (!seedCode) return res.status(400).json({ error: "Missing code" });
     var KV2 = process.env.KV_REST_API_URL; var KV2T = process.env.KV_REST_API_TOKEN;
     if (!KV2 || !KV2T) return res.status(500).json({ error: "KV not configured" });
@@ -27,9 +29,15 @@ export default async function handler(req, res) {
       return r.json();
     };
     await kv2(["SET", "code:" + seedCode, "unbound"]);
-    await kv2(["SET", "code_duration:" + seedCode, String(seedSecs)]);
-    return res.status(200).json({ ok: true, code: seedCode, days: seedDays, secs: seedSecs });
+    if (isLifetime) {
+      await kv2(["SET", "lifetime_code:" + seedCode, "1"]);
+    } else {
+      await kv2(["SET", "code_duration:" + seedCode, String(seedSecs)]);
+    }
+    return res.status(200).json({ ok: true, code: seedCode, days: isLifetime ? "lifetime" : seedDays, secs: isLifetime ? null : seedSecs });
   }
+
+  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   var code = (body.code || "").trim().toUpperCase();
   var deviceId = (body.deviceId || "").trim();
