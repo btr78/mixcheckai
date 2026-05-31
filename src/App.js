@@ -1712,7 +1712,13 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode, user }) {
     var ext = f.name.split(".").pop().toLowerCase();
     var validExts = ["mp3","wav","aac","m4a","flac","ogg","mp4","mov","webm","wma"];
     if (validExts.indexOf(ext) === -1) {
-      setResults({ error:"File type not supported. Upload MP3, WAV, AAC, M4A, or FLAC." });
+      setResults({ error:"File type not supported. Upload MP3, WAV, AAC, or M4A." });
+      setStep(4); return;
+    }
+    var isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+    var safariUnsupported = ["flac","ogg","webm","wma"];
+    if (isSafari && safariUnsupported.indexOf(ext) !== -1) {
+      setResults({ error:"Safari can't decode " + ext.toUpperCase() + " files. Please convert to MP3 or WAV and try again. You can use an online converter like cloudconvert.com." });
       setStep(4); return;
     }
     if (f.size > 500 * 1024 * 1024) {
@@ -1752,8 +1758,11 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode, user }) {
       var errText = (err && err.message) ? err.message : "Could not analyze. Try an MP3 or WAV file.";
       if (errText.indexOf("expected pattern") !== -1 || errText.indexOf("Unable to decode") !== -1 ||
           errText.indexOf("Failed to decode") !== -1 || errText.indexOf("EncodingError") !== -1 ||
-          errText.indexOf("decode audio") !== -1) {
-        errText = "Could not decode this audio file. Please export as MP3 or WAV and try again.";
+          errText.indexOf("decode audio") !== -1 || errText.indexOf("Cannot decode") !== -1) {
+        var isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+        errText = isSafari
+          ? "Safari couldn't decode this file. Export as MP3 (128–320 kbps) or WAV and try again. FLAC, OGG, and WebM are not supported on Safari."
+          : "Could not decode this audio file. Please export as MP3 or WAV and try again.";
       }
       setResults({ error: errText });
       setStep(4);
