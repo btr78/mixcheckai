@@ -1670,6 +1670,116 @@ function CheatSheetPage({ mixer, instrument, isPro, onUnlockClick, onReset }) {
   );
 }
 
+function radix2fft(re, im) {
+  var n = re.length;
+  for (var i = 1, j = 0; i < n; i++) {
+    var bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) {
+      var t = re[i]; re[i] = re[j]; re[j] = t;
+      t = im[i]; im[i] = im[j]; im[j] = t;
+    }
+  }
+  for (var len = 2; len <= n; len <<= 1) {
+    var ang = -2 * Math.PI / len;
+    var wCos = Math.cos(ang), wSin = Math.sin(ang);
+    for (var i = 0; i < n; i += len) {
+      var cr = 1, ci = 0;
+      for (var j = 0; j < len >> 1; j++) {
+        var ur = re[i+j], ui = im[i+j];
+        var vr = re[i+j+(len>>1)] * cr - im[i+j+(len>>1)] * ci;
+        var vi = re[i+j+(len>>1)] * ci + im[i+j+(len>>1)] * cr;
+        re[i+j] = ur + vr; im[i+j] = ui + vi;
+        re[i+j+(len>>1)] = ur - vr; im[i+j+(len>>1)] = ui - vi;
+        var ncr = cr * wCos - ci * wSin;
+        ci = cr * wSin + ci * wCos;
+        cr = ncr;
+      }
+    }
+  }
+}
+
+function chromaFromSamples(samples, sampleRate) {
+  var FFT_SIZE = 4096;
+  var re = new Float32Array(FFT_SIZE);
+  var im = new Float32Array(FFT_SIZE);
+  var n = Math.min(samples.length, FFT_SIZE);
+  for (var i = 0; i < n; i++) {
+    var w = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (n - 1));
+    re[i] = samples[i] * w;
+  }
+  radix2fft(re, im);
+  var freqPerBin = sampleRate / FFT_SIZE;
+  var chroma = new Array(12).fill(0);
+  for (var b = 1; b < FFT_SIZE / 2; b++) {
+    var freq = b * freqPerBin;
+    if (freq < 55 || freq > 4200) continue;
+    var mag = Math.sqrt(re[b] * re[b] + im[b] * im[b]);
+    var midiF = 12 * Math.log2(freq / 440) + 69;
+    var pc = ((Math.round(midiF) % 12) + 12) % 12;
+    chroma[pc] += mag;
+  }
+  var mx = Math.max.apply(null, chroma);
+  if (mx > 0) for (var i = 0; i < 12; i++) chroma[i] /= mx;
+  return chroma;
+}
+
+function matchChord(chroma) {
+  var NOTE = ['C','C#','D','Eb','E','F','F#','G','Ab','A','Bb','B'];
+  var TMPL = {
+    '':    [1,0,0,0,1,0,0,1,0,0,0,0],
+    'm':   [1,0,0,1,0,0,0,1,0,0,0,0],
+    '7':   [1,0,0,0,1,0,0,1,0,0,1,0],
+    'maj7':[1,0,0,0,1,0,0,1,0,0,0,1],
+    'm7':  [1,0,0,1,0,0,0,1,0,0,1,0],
+    'sus4':[1,0,0,0,0,1,0,1,0,0,0,0],
+  };
+  var best = -1, bestName = '?';
+  Object.keys(TMPL).forEach(function(type) {
+    var tmpl = TMPL[type];
+    for (var root = 0; root < 12; root++) {
+      var score = 0;
+      for (var i = 0; i < 12; i++) score += chroma[(i + root) % 12] * tmpl[i];
+      if (score > best) { best = score; bestName = NOTE[root] + type; }
+    }
+  });
+  return bestName;
+}
+
+async function detectChordsFromFile(file) {
+  var ab = await readBlobAsArrayBuffer(file);
+  var AudioCtxClass = window.AudioContext || window.webkitAudioContext;
+  var ctx = new AudioCtxClass();
+  try { await ctx.resume(); } catch(e) {}
+  var audioBuffer;
+  try { audioBuffer = await decodeAudioDataSafe(ctx, ab); }
+  finally { ctx.close(); }
+
+  var samples = audioBuffer.getChannelData(0);
+  var sr = audioBuffer.sampleRate;
+  var HOP = Math.floor(sr * 2);
+  var FFT_SIZE = 4096;
+  var chordList = [];
+
+  for (var offset = 0; offset + FFT_SIZE <= samples.length; offset += HOP) {
+    var window = samples.slice(offset, offset + FFT_SIZE);
+    var chroma = chromaFromSamples(window, sr);
+    var chord = matchChord(chroma);
+    var timeSec = offset / sr;
+    chordList.push({ time: timeSec, chord: chord });
+  }
+
+  var simplified = [];
+  chordList.forEach(function(c) {
+    if (!simplified.length || simplified[simplified.length-1].chord !== c.chord) {
+      simplified.push(c);
+    }
+  });
+
+  return simplified;
+}
+
 function AnalyzePage({ navigate, isPro, onUnlockClick, appMode, user }) {
   var stepState = useState(1); var step = stepState[0]; var setStep = stepState[1];
   var mixerState = useState(null); var mixer = mixerState[0]; var setMixer = mixerState[1];
@@ -1694,6 +1804,19 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode, user }) {
   var stemSaveState = useState(null); var stemSaveStatus = stemSaveState[0]; var setStemSaveStatus = stemSaveState[1];
   var stemSliceMinsState = useState(null); var stemSliceMins = stemSliceMinsState[0]; var setStemSliceMins = stemSliceMinsState[1];
   var stemPlayingState = useState(false); var stemPlaying = stemPlayingState[0]; var setStemPlaying = stemPlayingState[1];
+  var stemSpeedState = useState(1.0); var stemSpeed = stemSpeedState[0]; var setStemSpeed = stemSpeedState[1];
+  var stemSemitonesState = useState(0); var stemSemitones = stemSemitonesState[0]; var setStemSemitones = stemSemitonesState[1];
+  var stemPitchBuffersRef = useRef({});
+  var stemPitchCtxRef = useRef(null);
+  var stemPitchSourcesRef = useRef([]);
+  var stemPitchStartRef = useRef(0);
+  var stemPitchOffsetRef = useRef(0);
+  var stemPitchActiveRef = useRef(false);
+  var lyricsState = useState(null); var lyrics = lyricsState[0]; var setLyrics = lyricsState[1];
+  var lyricsLoadingState = useState(false); var lyricsLoading = lyricsLoadingState[0]; var setLyricsLoading = lyricsLoadingState[1];
+  var lyricsPredIdRef = useRef(null);
+  var chordsState = useState(null); var chords = chordsState[0]; var setChords = chordsState[1];
+  var chordsLoadingState = useState(false); var chordsLoading = chordsLoadingState[0]; var setChordsLoading = chordsLoadingState[1];
   var stemAudioRefs = useRef({});
   var stemsBalanceState = useState(null); var stemsBalance = stemsBalanceState[0]; var setStemsBalance = stemsBalanceState[1];
   var clickMutedState = useState(true); var clickMuted = clickMutedState[0]; var setClickMuted = clickMutedState[1];
@@ -1789,6 +1912,14 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode, user }) {
     stemAudioRefs.current = {};
     setStemMuted({ drums:false, bass:false, vocals:false, other:false });
     setStemPlaying(false);
+    setStemSpeed(1.0); setStemSemitones(0);
+    stemPitchSourcesRef.current.forEach(function(s) { try { s.source.stop(0); } catch(e) {} });
+    stemPitchSourcesRef.current = [];
+    stemPitchBuffersRef.current = {};
+    stemPitchActiveRef.current = false;
+    if (stemPitchCtxRef.current) { try { stemPitchCtxRef.current.close(); } catch(e) {} stemPitchCtxRef.current = null; }
+    setLyrics(null); setLyricsLoading(false); lyricsPredIdRef.current = null;
+    setChords(null); setChordsLoading(false);
     if (clickRef.current.intervalId) clearInterval(clickRef.current.intervalId);
     if (clickRef.current.ctx) { try { clickRef.current.ctx.close(); } catch(e) {} }
     clickRef.current = { ctx:null, intervalId:null, gainNode:null };
@@ -1949,7 +2080,111 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode, user }) {
     if (stemPlaying) { stopClick(); startClick(next); }
   };
 
+  var handleStemSpeed = function(val) {
+    setStemSpeed(val);
+    Object.values(stemAudioRefs.current).forEach(function(a) { if (a) a.playbackRate = val; });
+    stemPitchSourcesRef.current.forEach(function(s) { try { s.source.playbackRate.value = val; } catch(e) {} });
+  };
+
+  var startPitchPlayback = function(semitones, offset, ctx) {
+    stemPitchSourcesRef.current.forEach(function(s) { try { s.source.stop(0); } catch(e) {} });
+    stemPitchSourcesRef.current = [];
+    if (!ctx) return;
+    var startAt = ctx.currentTime + 0.05;
+    stemPitchStartRef.current = startAt - 0.05;
+    stemPitchOffsetRef.current = offset;
+
+    Object.keys(stemPitchBuffersRef.current).forEach(function(k) {
+      var buf = stemPitchBuffersRef.current[k];
+      if (!buf || stemMuted[k]) return;
+      var source = ctx.createBufferSource();
+      source.buffer = buf;
+      source.detune.value = semitones * 100;
+      source.playbackRate.value = stemSpeed;
+      var gain = ctx.createGain();
+      var faderEl = stemFaderRefs.current[k];
+      gain.gain.value = faderEl ? parseFloat(faderEl.value || '1') : 1.0;
+      source.connect(gain);
+      gain.connect(ctx.destination);
+      source.start(startAt, Math.max(0, offset));
+      source.onended = function() { if (stemPitchActiveRef.current) setStemPlaying(false); };
+      stemPitchSourcesRef.current.push({ key: k, source: source, gain: gain });
+    });
+  };
+
+  var handleStemSemitones = useCallback(async function(semitones) {
+    setStemSemitones(semitones);
+    if (!stemOutputs) return;
+
+    var pos = 0;
+    if (stemPitchActiveRef.current && stemPitchCtxRef.current) {
+      pos = stemPitchCtxRef.current.currentTime - stemPitchStartRef.current + stemPitchOffsetRef.current;
+    } else {
+      var firstAudio = Object.values(stemAudioRefs.current)[0];
+      if (firstAudio) pos = firstAudio.currentTime;
+    }
+
+    var wasPlaying = stemPlaying;
+
+    Object.values(stemAudioRefs.current).forEach(function(a) { if (a) a.pause(); });
+    stemPitchSourcesRef.current.forEach(function(s) { try { s.source.stop(0); } catch(e) {} });
+    stemPitchSourcesRef.current = [];
+
+    if (semitones === 0) {
+      stemPitchActiveRef.current = false;
+      if (wasPlaying) {
+        Object.values(stemAudioRefs.current).forEach(function(a) {
+          if (a) { a.currentTime = pos; a.playbackRate = stemSpeed; a.play().catch(function(){}); }
+        });
+      }
+      return;
+    }
+
+    var AudioCtxClass = window.AudioContext || window.webkitAudioContext;
+    if (!stemPitchCtxRef.current || stemPitchCtxRef.current.state === 'closed') {
+      stemPitchCtxRef.current = new AudioCtxClass();
+    }
+    var ctx = stemPitchCtxRef.current;
+    try { await ctx.resume(); } catch(e) {}
+
+    var keys = Object.keys(stemOutputs);
+    for (var ki = 0; ki < keys.length; ki++) {
+      var k = keys[ki];
+      if (!stemPitchBuffersRef.current[k]) {
+        try {
+          var resp = await fetch(stemOutputs[k]);
+          var ab = await resp.arrayBuffer();
+          var buf = await decodeAudioDataSafe(ctx, ab);
+          stemPitchBuffersRef.current[k] = buf;
+        } catch(e) { console.warn('Pitch buffer load failed for', k, e); }
+      }
+    }
+
+    stemPitchActiveRef.current = true;
+    stemPitchOffsetRef.current = pos;
+
+    if (wasPlaying || semitones !== 0) {
+      startPitchPlayback(semitones, pos, ctx);
+      setStemPlaying(true);
+    }
+  }, [stemOutputs, stemPlaying, stemSpeed, stemMuted]);
+
   var handleStemPlayPause = function() {
+    if (stemPitchActiveRef.current) {
+      if (stemPlaying) {
+        stemPitchSourcesRef.current.forEach(function(s) { try { s.source.stop(0); } catch(e) {} });
+        stemPitchSourcesRef.current = [];
+        var elapsed = stemPitchCtxRef.current ? (stemPitchCtxRef.current.currentTime - stemPitchStartRef.current + stemPitchOffsetRef.current) : stemPitchOffsetRef.current;
+        stemPitchOffsetRef.current = elapsed;
+        stopClick();
+        setStemPlaying(false);
+      } else {
+        startPitchPlayback(stemSemitones, stemPitchOffsetRef.current, stemPitchCtxRef.current);
+        startClick(clickBpm);
+        setStemPlaying(true);
+      }
+      return;
+    }
     var refs = stemAudioRefs.current;
     var keys = Object.keys(refs);
     if (keys.length === 0) return;
@@ -1959,7 +2194,7 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode, user }) {
       setStemPlaying(false);
     } else {
       var t = refs[keys[0]].currentTime;
-      keys.forEach(function(k) { refs[k].currentTime = t; });
+      keys.forEach(function(k) { refs[k].currentTime = t; refs[k].playbackRate = stemSpeed; });
       var plays = keys.map(function(k) { return refs[k].play().catch(function(){}); });
       Promise.all(plays).then(function() { setStemPlaying(true); });
       startClick(clickBpm);
@@ -1967,6 +2202,11 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode, user }) {
   };
 
   var handleStemStop = function() {
+    if (stemPitchActiveRef.current) {
+      stemPitchSourcesRef.current.forEach(function(s) { try { s.source.stop(0); } catch(e) {} });
+      stemPitchSourcesRef.current = [];
+      stemPitchOffsetRef.current = 0;
+    }
     var refs = stemAudioRefs.current;
     Object.keys(refs).forEach(function(k) { refs[k].pause(); refs[k].currentTime = 0; });
     stopClick();
@@ -1974,13 +2214,66 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode, user }) {
   };
 
   var handleStemMute = function(key) {
-    var a = stemAudioRefs.current[key];
-    if (!a) return;
     var next = Object.assign({}, stemMuted);
     next[key] = !next[key];
-    a.muted = next[key];
+    if (stemPitchActiveRef.current) {
+      var src = stemPitchSourcesRef.current.find(function(s) { return s.key === key; });
+      if (src) src.gain.gain.value = next[key] ? 0 : (stemFaderRefs.current[key] ? parseFloat(stemFaderRefs.current[key].value || '1') : 1.0);
+    } else {
+      var a = stemAudioRefs.current[key];
+      if (a) a.muted = next[key];
+    }
     setStemMuted(next);
   };
+
+  var handleGetLyrics = useCallback(async function() {
+    if (!file || lyricsLoading) return;
+    setLyricsLoading(true);
+    setLyrics(null);
+    try {
+      var STEM_BYTE_LIMIT = 3 * 1024 * 1024;
+      var blob = file.size > STEM_BYTE_LIMIT ? file.slice(0, STEM_BYTE_LIMIT) : file;
+      var dataUrl = await readFileAsDataURL(blob);
+      var resp = await fetch("/api/transcribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ audioBase64: dataUrl }),
+      });
+      var data = await resp.json();
+      if (!resp.ok || !data.predictionId) throw new Error(data.error || "Failed to start");
+      lyricsPredIdRef.current = data.predictionId;
+
+      for (var i = 0; i < 60; i++) {
+        await new Promise(function(r) { setTimeout(r, 5000); });
+        var sr = await fetch("/api/stems-status?id=" + lyricsPredIdRef.current);
+        var sd = await sr.json();
+        if (sd.status === "succeeded") {
+          var text = typeof sd.output === "string" ? sd.output : (sd.output && sd.output.transcription) || JSON.stringify(sd.output);
+          setLyrics(text);
+          setLyricsLoading(false);
+          return;
+        }
+        if (sd.status === "failed" || sd.status === "canceled") throw new Error("Transcription failed");
+      }
+      throw new Error("Timed out");
+    } catch(e) {
+      setLyrics("Error: " + e.message);
+      setLyricsLoading(false);
+    }
+  }, [file, lyricsLoading]);
+
+  var handleDetectChords = useCallback(async function() {
+    if (!file || chordsLoading) return;
+    setChordsLoading(true);
+    setChords(null);
+    try {
+      var result = await detectChordsFromFile(file);
+      setChords(result);
+    } catch(e) {
+      setChords([{ time:0, chord:"Error: " + e.message }]);
+    }
+    setChordsLoading(false);
+  }, [file, chordsLoading]);
   var handleStemVolume = function(key, val, inputEl, col) {
     var a = stemAudioRefs.current[key];
     if (a) a.volume = val;
@@ -2533,6 +2826,45 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode, user }) {
                           </button>
                         </div>
 
+                        <div style={{ background:"#0a0c14", border:"1px solid #1a1f2e", borderRadius:12, padding:"14px 16px", marginBottom:10 }}>
+                          <div style={{ fontSize:11, color:"#4a5568", fontFamily:"sans-serif", fontWeight:700, letterSpacing:2, marginBottom:12 }}>PLAYBACK CONTROLS</div>
+                          <div style={{ display:"flex", gap:20, flexWrap:"wrap" }}>
+                            <div style={{ flex:1, minWidth:140 }}>
+                              <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
+                                <span style={{ fontSize:11, color:"#9ca3af", fontFamily:"sans-serif" }}>Speed</span>
+                                <span style={{ fontSize:11, color:"#e8eaf0", fontFamily:"monospace", fontWeight:700 }}>{stemSpeed.toFixed(2)}x</span>
+                              </div>
+                              <input type="range" min="0.5" max="2" step="0.05" value={stemSpeed}
+                                onChange={function(e) { handleStemSpeed(parseFloat(e.target.value)); }}
+                                className="stem-fader"
+                                style={{ "--fc":"#00e5a0", background:"linear-gradient(to right,#00e5a0 "+Math.round((stemSpeed-0.5)/1.5*100)+"%,#1a1f2e "+Math.round((stemSpeed-0.5)/1.5*100)+"%)" }} />
+                              <div style={{ display:"flex", justifyContent:"space-between", marginTop:3 }}>
+                                <span style={{ fontSize:9, color:"#2a3040", fontFamily:"sans-serif" }}>0.5x</span>
+                                <span style={{ fontSize:9, color:"#2a3040", fontFamily:"sans-serif" }}>2.0x</span>
+                              </div>
+                            </div>
+                            <div style={{ flex:1, minWidth:140 }}>
+                              <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
+                                <span style={{ fontSize:11, color:"#9ca3af", fontFamily:"sans-serif" }}>Pitch</span>
+                                <span style={{ fontSize:11, color: stemSemitones===0?"#e8eaf0":"#a78bfa", fontFamily:"monospace", fontWeight:700 }}>
+                                  {stemSemitones > 0 ? "+" : ""}{stemSemitones} st
+                                  {stemSemitones !== 0 && stemPitchActiveRef.current && " ok"}
+                                </span>
+                              </div>
+                              <input type="range" min="-6" max="6" step="1" value={stemSemitones}
+                                onChange={function(e) { handleStemSemitones(parseInt(e.target.value,10)); }}
+                                className="stem-fader"
+                                style={{ "--fc":"#a78bfa", background:"linear-gradient(to right,#1a1f2e "+(50)+"%,#a78bfa "+(50)+"%,#a78bfa "+(50 + stemSemitones/12*50)+"%,#1a1f2e "+(50 + stemSemitones/12*50)+"%)" }} />
+                              <div style={{ display:"flex", justifyContent:"space-between", marginTop:3 }}>
+                                <span style={{ fontSize:9, color:"#2a3040", fontFamily:"sans-serif" }}>-6</span>
+                                <span style={{ fontSize:9, color:"#2a3040", fontFamily:"sans-serif" }}>+6</span>
+                              </div>
+                            </div>
+                          </div>
+                          {stemSemitones !== 0 && !stemPitchActiveRef.current && Object.keys(stemPitchBuffersRef.current).length === 0 && (
+                            <div style={{ fontSize:10, color:"#6b7280", fontFamily:"sans-serif", marginTop:8 }}>Loading stems for pitch shift… press Play to begin.</div>
+                          )}
+                        </div>
                         <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
                           <button onClick={handleStemPlayPause}
                             style={{ background:"linear-gradient(135deg,#7c3aed,#a78bfa)", color:"#fff", border:"none", borderRadius:8, padding:"10px 22px", fontSize:13, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer", minWidth:108 }}>
@@ -2544,7 +2876,7 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode, user }) {
                               ■  Stop
                             </button>
                           )}
-                          <button onClick={function(){handleStemStop();setStemStatus(null);setStemOutputs(null);setStemMuted({drums:false,bass:false,vocals:false,guitar:false,piano:false,other:false});Object.values(stemFaderRefs.current).forEach(function(el){if(el){el.value=1;el.style.background="";var p=el.parentNode&&el.parentNode.querySelector(".vol-pct");if(p)p.textContent="100%";}});stemFaderRefs.current={};setStemSliceMins(null);}}
+                          <button onClick={function(){handleStemStop();setStemStatus(null);setStemOutputs(null);setStemMuted({drums:false,bass:false,vocals:false,guitar:false,piano:false,other:false});Object.values(stemFaderRefs.current).forEach(function(el){if(el){el.value=1;el.style.background="";var p=el.parentNode&&el.parentNode.querySelector(".vol-pct");if(p)p.textContent="100%";}});stemFaderRefs.current={};setStemSliceMins(null);setStemSpeed(1.0);setStemSemitones(0);stemPitchSourcesRef.current.forEach(function(s){try{s.source.stop(0);}catch(e){}});stemPitchSourcesRef.current=[];stemPitchBuffersRef.current={};stemPitchActiveRef.current=false;}}
                             style={{ background:"transparent", border:"1px solid #1a1f2e", borderRadius:6, padding:"5px 12px", color:"#4a5568", fontSize:11, cursor:"pointer", fontFamily:"sans-serif", marginLeft:"auto" }}>
                             Separate Another
                           </button>
@@ -2638,7 +2970,60 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode, user }) {
                     </div>
                   </div>
                 )}
-                <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+                {file && !results.error && (
+                  <div>
+                    <div style={{ marginTop:16, background:"#0a0c14", border:"1px solid #1a1f2e", borderRadius:12, padding:"16px" }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+                        <div style={{ fontSize:11, color:"#4a5568", fontFamily:"sans-serif", fontWeight:700, letterSpacing:2 }}>AI LYRICS</div>
+                        {!lyrics && !lyricsLoading && (
+                          <button onClick={handleGetLyrics}
+                            style={{ background:"#1a1f2e", border:"1px solid #2a3040", borderRadius:6, padding:"6px 14px", fontSize:11, color:"#9ca3af", cursor:"pointer", fontFamily:"sans-serif", fontWeight:600 }}>
+                            Transcribe Lyrics
+                          </button>
+                        )}
+                      </div>
+                      {lyricsLoading && <div style={{ fontSize:12, color:"#6b7280", fontFamily:"sans-serif" }}>Transcribing… this takes 30–60 seconds</div>}
+                      {lyrics && (
+                        <div style={{ fontSize:13, color:"#e8eaf0", fontFamily:"sans-serif", lineHeight:1.8, whiteSpace:"pre-wrap", maxHeight:300, overflowY:"auto" }}>
+                          {lyrics}
+                        </div>
+                      )}
+                      {!lyrics && !lyricsLoading && (
+                        <div style={{ fontSize:11, color:"#2a3040", fontFamily:"sans-serif" }}>AI-powered vocal transcription using OpenAI Whisper</div>
+                      )}
+                    </div>
+                    <div style={{ marginTop:10, background:"#0a0c14", border:"1px solid #1a1f2e", borderRadius:12, padding:"16px" }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+                        <div style={{ fontSize:11, color:"#4a5568", fontFamily:"sans-serif", fontWeight:700, letterSpacing:2 }}>CHORD PROGRESSION</div>
+                        {!chords && !chordsLoading && (
+                          <button onClick={handleDetectChords}
+                            style={{ background:"#1a1f2e", border:"1px solid #2a3040", borderRadius:6, padding:"6px 14px", fontSize:11, color:"#9ca3af", cursor:"pointer", fontFamily:"sans-serif", fontWeight:600 }}>
+                            Detect Chords
+                          </button>
+                        )}
+                      </div>
+                      {chordsLoading && <div style={{ fontSize:12, color:"#6b7280", fontFamily:"sans-serif" }}>Analyzing chords…</div>}
+                      {chords && (
+                        <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+                          {chords.map(function(c, i) {
+                            return (
+                              <div key={i} style={{ background:"rgba(74,124,255,0.12)", border:"1px solid rgba(74,124,255,0.3)", borderRadius:8, padding:"6px 12px", fontSize:13, fontFamily:"monospace", fontWeight:700, color:"#4a7cff" }}>
+                                <span style={{ fontSize:9, color:"#2a3040", display:"block", marginBottom:2 }}>
+                                  {Math.floor(c.time/60)}:{String(Math.round(c.time%60)).padStart(2,'0')}
+                                </span>
+                                {c.chord}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {!chords && !chordsLoading && (
+                        <div style={{ fontSize:11, color:"#2a3040", fontFamily:"sans-serif" }}>Detect chord progressions directly in your browser — no upload needed</div>
+                      )}
+                    </div>
+                  </div>
+                )}
+                <div style={{ display:"flex", gap:10, flexWrap:"wrap", marginTop:16 }}>
                   <button onClick={reset} style={{ background:"transparent", border:"1px solid #1a1f2e", borderRadius:10, padding:"11px 22px", color:"#6b7280", fontSize:13, fontFamily:"sans-serif", cursor:"pointer" }}>Analyze Another File</button>
                   {isPro && <button onClick={function() { generatePDF(results, file ? file.name : "recording"); }} style={{ background:"linear-gradient(135deg,#4a7cff,#7c3aed)", color:"#fff", border:"none", borderRadius:10, padding:"11px 22px", fontSize:13, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer" }}>Download PDF Report</button>}
                 </div>

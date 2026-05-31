@@ -99,9 +99,9 @@ export default async function handler(req, res) {
         version: "25a173108cff36ef9f80f854c162d01df9e6528be175794b81158fa03836d953",
         input: {
           audio: audioBase64,
-          model: "htdemucs",
+          model: "htdemucs_ft",
           clip_mode: "rescale",
-          shifts: 1,
+          shifts: 2,
           overlap: 0.25,
           jobs: 0,
         },
