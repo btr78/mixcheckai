@@ -295,10 +295,10 @@ function HistoryPage({ navigate, user }) {
                 </div>
                 <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(100px,1fr))", gap:8 }}>
                   {[
-                    { label:"LUFS", val:entry.lufs },
-                    { label:"PEAK", val:entry.peakDb + " dBTP" },
-                    { label:"DYNAMIC", val:entry.dynRange + " LU" },
-                    { label:"STEREO", val:entry.stereoWidth + "%" },
+                    { label:"LUFS", val:(+entry.lufs).toFixed(1) },
+                    { label:"PEAK", val:(+entry.peakDb).toFixed(1) + " dBTP" },
+                    { label:"DYNAMIC", val:(+entry.dynRange).toFixed(1) + " LU" },
+                    { label:"STEREO", val:Math.round(+entry.stereoWidth) + "%" },
                   ].map(function(m, j) {
                     return (
                       <div key={j} style={{ background:"#060810", borderRadius:8, padding:"8px 10px" }}>
@@ -1182,10 +1182,10 @@ function generatePDF(results, fileName) {
   win.document.write('<!DOCTYPE html><html><head><title>MixCheck AI Report</title><style>body{font-family:Arial,sans-serif;max-width:800px;margin:0 auto;padding:40px;color:#111}h1{font-size:28px;margin:0 0 4px}.sub{color:#666;font-size:13px;margin-bottom:32px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:32px}.metric{border:1px solid #e0e0e0;border-radius:10px;padding:16px}.ml{font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#888;margin-bottom:6px}.mv{font-size:26px;font-weight:900;margin-bottom:4px}.ms{font-size:11px;font-weight:700;margin-bottom:6px}.ma{font-size:12px;color:#555;line-height:1.5}.st{font-size:13px;letter-spacing:3px;text-transform:uppercase;color:#00a070;border-bottom:2px solid #00a070;padding-bottom:8px;margin:28px 0 16px}.rec{border-left:3px solid #ccc;padding:10px 14px;margin-bottom:12px;background:#fafafa;border-radius:0 8px 8px 0}.rec.high{border-color:#e33}.rec.med{border-color:#f90}.rec.ok{border-color:#0a0}.rec.tip{border-color:#4a7cff}.rt{font-weight:700;font-size:14px;margin-bottom:4px}.rd{font-size:13px;color:#444;line-height:1.6}.fi{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #eee;font-size:13px}.footer{margin-top:48px;text-align:center;font-size:11px;color:#aaa}</style></head><body>');
   win.document.write('<h1>MixCheck AI</h1><div class="sub">Audio Analysis Report - ' + now + ' - ' + fileName + '</div>');
   win.document.write('<div class="grid">');
-  win.document.write('<div class="metric"><div class="ml">Loudness</div><div class="mv">' + results.lufs + ' LUFS</div><div class="ms">Target: -16 LUFS | ' + ld.label + '</div><div class="ma">' + ld.advice + '</div></div>');
-  win.document.write('<div class="metric"><div class="ml">True Peak</div><div class="mv">' + results.peakDb + ' dBTP</div><div class="ms">Below -1 dBTP | ' + pd.label + '</div><div class="ma">' + pd.advice + '</div></div>');
-  win.document.write('<div class="metric"><div class="ml">Dynamic Range</div><div class="mv">' + results.dynRange + ' LU</div><div class="ms">Target: 8-14 LU | ' + dd.label + '</div><div class="ma">' + dd.advice + '</div></div>');
-  win.document.write('<div class="metric"><div class="ml">Stereo Width</div><div class="mv">' + results.stereoWidth + '%</div><div class="ms">Target: 20-75% | ' + sd.label + '</div><div class="ma">' + sd.advice + '</div></div>');
+  win.document.write('<div class="metric"><div class="ml">Loudness</div><div class="mv">' + (+results.lufs).toFixed(1) + ' LUFS</div><div class="ms">Target: -16 LUFS | ' + ld.label + '</div><div class="ma">' + ld.advice + '</div></div>');
+  win.document.write('<div class="metric"><div class="ml">True Peak</div><div class="mv">' + (+results.peakDb).toFixed(1) + ' dBTP</div><div class="ms">Below -1 dBTP | ' + pd.label + '</div><div class="ma">' + pd.advice + '</div></div>');
+  win.document.write('<div class="metric"><div class="ml">Dynamic Range</div><div class="mv">' + (+results.dynRange).toFixed(1) + ' LU</div><div class="ms">Target: 8-14 LU | ' + dd.label + '</div><div class="ma">' + dd.advice + '</div></div>');
+  win.document.write('<div class="metric"><div class="ml">Stereo Width</div><div class="mv">' + Math.round(+results.stereoWidth) + '%</div><div class="ms">Target: 20-75% | ' + sd.label + '</div><div class="ma">' + sd.advice + '</div></div>');
   win.document.write('</div><div class="st">Recommendations</div>' + recHTML);
   if (freqHTML) win.document.write('<div class="st">Frequency Balance</div>' + freqHTML);
   win.document.write('<div class="st">File Info</div>');
@@ -2737,10 +2737,10 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode, user }) {
                 )}
                 <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:10, marginBottom:20 }}>
                   {[
-                    Object.assign({ label:"LOUDNESS", val:results.lufs+" LUFS", target:"Target: -16 LUFS" }, getLufsDiagnosis(results.lufs)),
-                    Object.assign({ label:"TRUE PEAK", val:results.peakDb+" dBTP", target:"Below -1 dBTP" }, getPeakDiagnosis(results.peakDb)),
-                    Object.assign({ label:"DYNAMIC RANGE", val:results.dynRange+" LU", target:"Target: 8-14 LU" }, getDynDiagnosis(results.dynRange)),
-                    Object.assign({ label:"STEREO WIDTH", val:results.stereoWidth+"%", target:"Target: 20-75%" }, getStereoDiagnosis(results.stereoWidth)),
+                    Object.assign({ label:"LOUDNESS", val:(+results.lufs).toFixed(1)+" LUFS", target:"Target: -16 LUFS" }, getLufsDiagnosis(results.lufs)),
+                    Object.assign({ label:"TRUE PEAK", val:(+results.peakDb).toFixed(1)+" dBTP", target:"Below -1 dBTP" }, getPeakDiagnosis(results.peakDb)),
+                    Object.assign({ label:"DYNAMIC RANGE", val:(+results.dynRange).toFixed(1)+" LU", target:"Target: 8-14 LU" }, getDynDiagnosis(results.dynRange)),
+                    Object.assign({ label:"STEREO WIDTH", val:Math.round(+results.stereoWidth)+"%", target:"Target: 20-75%" }, getStereoDiagnosis(results.stereoWidth)),
                   ].map(function(m, i) {
                     return (
                       <div key={i} style={{ background:"#0d1017", border:"1px solid "+m.color+"33", borderRadius:12, padding:"14px" }}>
