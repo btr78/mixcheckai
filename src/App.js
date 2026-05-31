@@ -1837,6 +1837,9 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode, user }) {
   var stemPitchStartRef = useRef(0);
   var stemPitchOffsetRef = useRef(0);
   var stemPitchActiveRef = useRef(false);
+  var lyricsModeState = useState("sheet"); var lyricsMode = lyricsModeState[0]; var setLyricsMode = lyricsModeState[1];
+  var lyricsPlayPosState = useState(0); var lyricsPlayPos = lyricsPlayPosState[0]; var setLyricsPlayPos = lyricsPlayPosState[1];
+  var lyricsRafRef = useRef(null);
   var lyricsState = useState(null); var lyrics = lyricsState[0]; var setLyrics = lyricsState[1];
   var lyricsLoadingState = useState(false); var lyricsLoading = lyricsLoadingState[0]; var setLyricsLoading = lyricsLoadingState[1];
   var lyricsPredIdRef = useRef(null);
@@ -2373,8 +2376,13 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode, user }) {
         var sr = await fetch("/api/stems-status?id=" + lyricsPredIdRef.current);
         var sd = await sr.json();
         if (sd.status === "succeeded") {
-          var text = typeof sd.output === "string" ? sd.output : (sd.output && sd.output.transcription) || JSON.stringify(sd.output);
-          setLyrics(text);
+          if (sd.output && typeof sd.output === "object" && sd.output.segments && sd.output.segments.length > 0) {
+            setLyrics({ text: sd.output.transcription || sd.output.text || "", segments: sd.output.segments });
+          } else if (typeof sd.output === "string") {
+            setLyrics({ text: sd.output, segments: [] });
+          } else {
+            setLyrics({ text: (sd.output && sd.output.transcription) || (sd.output && sd.output.text) || JSON.stringify(sd.output), segments: [] });
+          }
           setLyricsLoading(false);
           return;
         }
@@ -2399,6 +2407,23 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode, user }) {
     }
     setChordsLoading(false);
   }, [file, chordsLoading]);
+  useEffect(function() {
+    if (!stemPlaying) {
+      if (lyricsRafRef.current) { cancelAnimationFrame(lyricsRafRef.current); lyricsRafRef.current = null; }
+      return;
+    }
+    var tick = function() {
+      var keys = Object.keys(stemAudioRefs.current);
+      if (keys.length > 0) {
+        var a = stemAudioRefs.current[keys[0]];
+        if (a) setLyricsPlayPos(a.currentTime);
+      }
+      lyricsRafRef.current = requestAnimationFrame(tick);
+    };
+    lyricsRafRef.current = requestAnimationFrame(tick);
+    return function() { if (lyricsRafRef.current) { cancelAnimationFrame(lyricsRafRef.current); lyricsRafRef.current = null; } };
+  }, [stemPlaying]);
+
   var handleStemVolume = function(key, val, inputEl, col) {
     var a = stemAudioRefs.current[key];
     if (a) a.volume = val;
@@ -3105,21 +3130,71 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode, user }) {
                 {file && !results.error && (
                   <div>
                     <div style={{ marginTop:16, background:"#0a0c14", border:"1px solid #1a1f2e", borderRadius:12, padding:"16px" }}>
-                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
-                        <div style={{ fontSize:11, color:"#4a5568", fontFamily:"sans-serif", fontWeight:700, letterSpacing:2 }}>AI LYRICS</div>
-                        {!lyrics && !lyricsLoading && (
-                          <button onClick={handleGetLyrics}
-                            style={{ background:"#1a1f2e", border:"1px solid #2a3040", borderRadius:6, padding:"6px 14px", fontSize:11, color:"#9ca3af", cursor:"pointer", fontFamily:"sans-serif", fontWeight:600 }}>
-                            Transcribe Lyrics
-                          </button>
+                      <div style={{ fontSize:10, letterSpacing:3, color:"#a78bfa", fontFamily:"monospace", fontWeight:700, marginBottom:10 }}>AI LYRICS</div>
+                      <div style={{ display:"flex", gap:8, marginBottom:12, alignItems:"center" }}>
+                        <button onClick={handleGetLyrics} disabled={lyricsLoading}
+                          style={{ background: lyricsLoading?"#1a1f2e":"#a78bfa22", border:"1px solid #a78bfa55", borderRadius:7, padding:"6px 14px", fontSize:11, color:"#a78bfa", fontFamily:"sans-serif", cursor: lyricsLoading?"default":"pointer" }}>
+                          {lyricsLoading ? "Transcribing…" : (lyrics && typeof lyrics === "object" ? "Re-transcribe" : "Get Lyrics")}
+                        </button>
+                        {lyrics && typeof lyrics === "object" && lyrics.segments && lyrics.segments.length > 0 && (
+                          <div style={{ display:"flex", gap:6 }}>
+                            <button onClick={function(){setLyricsMode("sheet");}}
+                              style={{ background: lyricsMode==="sheet"?"#a78bfa33":"transparent", border:"1px solid "+(lyricsMode==="sheet"?"#a78bfa":"#2a3040"), borderRadius:6, padding:"4px 10px", fontSize:10, color: lyricsMode==="sheet"?"#a78bfa":"#6b7280", fontFamily:"sans-serif", cursor:"pointer" }}>
+                              Sheet
+                            </button>
+                            <button onClick={function(){setLyricsMode("live");}}
+                              style={{ background: lyricsMode==="live"?"#a78bfa33":"transparent", border:"1px solid "+(lyricsMode==="live"?"#a78bfa":"#2a3040"), borderRadius:6, padding:"4px 10px", fontSize:10, color: lyricsMode==="live"?"#a78bfa":"#6b7280", fontFamily:"sans-serif", cursor:"pointer" }}>
+                              ▶ Live
+                            </button>
+                          </div>
                         )}
                       </div>
-                      {lyricsLoading && <div style={{ fontSize:12, color:"#6b7280", fontFamily:"sans-serif" }}>Transcribing… this takes 30–60 seconds</div>}
-                      {lyrics && (
-                        <div style={{ fontSize:13, color:"#e8eaf0", fontFamily:"sans-serif", lineHeight:1.8, whiteSpace:"pre-wrap", maxHeight:300, overflowY:"auto" }}>
-                          {lyrics}
-                        </div>
-                      )}
+                      {typeof lyrics === "string" && <div style={{ fontSize:12, color:"#ff5757", fontFamily:"sans-serif" }}>{lyrics}</div>}
+                      {lyrics && typeof lyrics === "object" && (function() {
+                        var segs = lyrics.segments || [];
+                        if (segs.length === 0) {
+                          return <div style={{ fontSize:13, color:"#9ca3af", fontFamily:"sans-serif", whiteSpace:"pre-wrap", lineHeight:1.8 }}>{lyrics.text}</div>;
+                        }
+                        var chordsArr = chords || [];
+                        var segCards = segs.map(function(seg, si) {
+                          var segChords = chordsArr.filter(function(c) { return c.time >= seg.start && c.time < seg.end; });
+                          var deduped = [];
+                          segChords.forEach(function(c) { if (!deduped.length || deduped[deduped.length-1].chord !== c.chord) deduped.push(c); });
+                          var isActive = lyricsMode === "live" && lyricsPlayPos >= seg.start && lyricsPlayPos < (segs[si+1] ? segs[si+1].start : seg.end + 5);
+                          var isDim = lyricsMode === "live" && lyricsPlayPos >= (segs[si+1] ? segs[si+1].start : seg.end + 5);
+                          return { seg:seg, chords:deduped, isActive:isActive, isDim:isDim, si:si };
+                        });
+                        if (lyricsMode === "live") {
+                          var activeIdx = segCards.findIndex(function(s) { return s.isActive; });
+                          if (activeIdx < 0) activeIdx = segCards.findIndex(function(s) { return s.seg.start > lyricsPlayPos; }) - 1;
+                          if (activeIdx < 0) activeIdx = 0;
+                          var start = Math.max(0, activeIdx - 2);
+                          var end = Math.min(segCards.length, start + 5);
+                          segCards = segCards.slice(start, end);
+                        }
+                        return (
+                          <div style={{ maxHeight: lyricsMode==="live" ? "none" : 320, overflowY: lyricsMode==="live" ? "visible" : "auto", paddingRight:4 }}>
+                            {segCards.map(function(item) {
+                              return (
+                                <div key={item.si} style={{ marginBottom:14, opacity: item.isDim ? 0.3 : 1, transition:"opacity 0.3s" }}>
+                                  {item.chords.length > 0 && (
+                                    <div style={{ display:"flex", gap:12, marginBottom:3, flexWrap:"wrap" }}>
+                                      {item.chords.map(function(c, ci) {
+                                        return (
+                                          <span key={ci} style={{ fontSize:11, fontFamily:"monospace", fontWeight:900, color:"#f59e0b", letterSpacing:0.5 }}>{c.chord}</span>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                  <div style={{ fontSize: item.isActive ? 15 : 13, color: item.isActive ? "#ffffff" : "#9ca3af", fontFamily:"sans-serif", lineHeight:1.7, fontWeight: item.isActive ? 700 : 400, transition:"all 0.2s", borderLeft: item.isActive ? "3px solid #a78bfa" : "3px solid transparent", paddingLeft:8 }}>
+                                    {item.seg.text.trim()}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      })()}
                       {!lyrics && !lyricsLoading && (
                         <div style={{ fontSize:11, color:"#2a3040", fontFamily:"sans-serif" }}>AI-powered vocal transcription using OpenAI Whisper</div>
                       )}
