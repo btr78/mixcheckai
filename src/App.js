@@ -1763,8 +1763,8 @@ async function detectChordsFromFile(file) {
   var chordList = [];
 
   for (var offset = 0; offset + FFT_SIZE <= samples.length; offset += HOP) {
-    var window = samples.slice(offset, offset + FFT_SIZE);
-    var chroma = chromaFromSamples(window, sr);
+    var seg = samples.slice(offset, offset + FFT_SIZE);
+    var chroma = chromaFromSamples(seg, sr);
     var chord = matchChord(chroma);
     var timeSec = offset / sr;
     chordList.push({ time: timeSec, chord: chord });

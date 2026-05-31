@@ -19,14 +19,14 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: "Transcription not configured" });
     }
 
-    var response = await fetch("https://api.replicate.com/v1/predictions", {
+    var response = await fetch("https://api.replicate.com/v1/models/openai/whisper/predictions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Authorization": "Token " + process.env.REPLICATE_API_TOKEN,
+        "Prefer": "wait",
       },
       body: JSON.stringify({
-        version: "4d50797290df275329f202e48c76360b3f22b08d28c196cbc54600319435f8d",
         input: {
           audio: audioBase64,
           model: "large-v2",
