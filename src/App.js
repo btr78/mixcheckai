@@ -1780,6 +1780,31 @@ async function detectChordsFromFile(file) {
   return simplified;
 }
 
+function audioBufferToWav(buffer) {
+  var numChannels = buffer.numberOfChannels;
+  var sampleRate = buffer.sampleRate;
+  var length = buffer.length * numChannels * 2;
+  var arrayBuffer = new ArrayBuffer(44 + length);
+  var view = new DataView(arrayBuffer);
+  function writeStr(offset, str) { for (var i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i)); }
+  writeStr(0, 'RIFF'); view.setUint32(4, 36 + length, true);
+  writeStr(8, 'WAVE'); writeStr(12, 'fmt ');
+  view.setUint32(16, 16, true); view.setUint16(20, 1, true);
+  view.setUint16(22, numChannels, true); view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * numChannels * 2, true);
+  view.setUint16(32, numChannels * 2, true); view.setUint16(34, 16, true);
+  writeStr(36, 'data'); view.setUint32(40, length, true);
+  var offset = 44;
+  for (var i = 0; i < buffer.length; i++) {
+    for (var ch = 0; ch < numChannels; ch++) {
+      var sample = Math.max(-1, Math.min(1, buffer.getChannelData(ch)[i]));
+      view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
+      offset += 2;
+    }
+  }
+  return new Blob([arrayBuffer], { type: 'audio/wav' });
+}
+
 function AnalyzePage({ navigate, isPro, onUnlockClick, appMode, user }) {
   var stepState = useState(1); var step = stepState[0]; var setStep = stepState[1];
   var mixerState = useState(null); var mixer = mixerState[0]; var setMixer = mixerState[1];
@@ -1822,10 +1847,110 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode, user }) {
   var clickMutedState = useState(true); var clickMuted = clickMutedState[0]; var setClickMuted = clickMutedState[1];
   var clickBpmState = useState(120); var clickBpm = clickBpmState[0]; var setClickBpm = clickBpmState[1];
   var clickRef = useRef({ ctx:null, intervalId:null, gainNode:null });
+  var setlistFilesState = useState([]); var setlistFiles = setlistFilesState[0]; var setSetlistFiles = setlistFilesState[1];
+  var masteringState = useState(false); var mastering = masteringState[0]; var setMastering = masteringState[1];
+  var masteringErrorState = useState(""); var masteringError = masteringErrorState[0]; var setMasteringError = masteringErrorState[1];
 
   var selectedMixer = showCustom && customMixer.trim()
     ? { id:"custom", name: customMixer.trim(), type:"unknown", streams:"Aux/Main Out" }
     : (mixer || { id:"none", name:"Unknown Mixer", type:"unknown", streams:"Aux Out" });
+
+  var addToSetlist = function(f) {
+    if (!f) return;
+    var id = Date.now() + "_" + Math.random().toString(36).slice(2);
+    setSetlistFiles(function(prev) { return prev.concat([{ id:id, name:f.name, size:f.size, file:f, analyzed:false, bpm:null, key:null, lufs:null }]); });
+  };
+
+  var removeFromSetlist = function(id) {
+    setSetlistFiles(function(prev) { return prev.filter(function(item) { return item.id !== id; }); });
+  };
+
+  var analyzeSetlistItem = function(id) {
+    setSetlistFiles(function(prev) {
+      var item = prev.find(function(x) { return x.id === id; });
+      if (item) analyze(item.file);
+      return prev;
+    });
+  };
+
+  var handleExportMastered = useCallback(async function() {
+    if (!file) return;
+    setMastering(true); setMasteringError("");
+    try {
+      var ab = await readBlobAsArrayBuffer(file);
+      var sampleRate = 44100;
+      var AudioCtxClass = window.AudioContext || window.webkitAudioContext;
+      // Decode in a regular context first to get buffer length and sampleRate
+      var tmpCtx = new AudioCtxClass();
+      var decodedBuf;
+      try { decodedBuf = await decodeAudioDataSafe(tmpCtx, ab); }
+      finally { try { tmpCtx.close(); } catch(e) {} }
+      sampleRate = decodedBuf.sampleRate;
+      var numChannels = decodedBuf.numberOfChannels;
+      var length = decodedBuf.length;
+
+      // Build gain boost: target -14 LUFS, clamped to +12 dB max
+      var currentLufs = (results && isFinite(results.lufs)) ? results.lufs : -20;
+      var gainDb = Math.min(12, -14 - currentLufs);
+      var gainLinear = Math.pow(10, gainDb / 20);
+
+      var OfflineCtxClass = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+      var offlineCtx = new OfflineCtxClass(numChannels, length, sampleRate);
+
+      var source = offlineCtx.createBufferSource();
+      source.buffer = decodedBuf;
+
+      // Highpass filter at 30 Hz
+      var hpf = offlineCtx.createBiquadFilter();
+      hpf.type = "highpass";
+      hpf.frequency.value = 30;
+
+      // Compressor
+      var comp = offlineCtx.createDynamicsCompressor();
+      comp.threshold.value = -18;
+      comp.knee.value = 6;
+      comp.ratio.value = 4;
+      comp.attack.value = 0.003;
+      comp.release.value = 0.1;
+
+      // Limiter
+      var limiter = offlineCtx.createDynamicsCompressor();
+      limiter.threshold.value = -0.5;
+      limiter.knee.value = 0;
+      limiter.ratio.value = 20;
+      limiter.attack.value = 0.001;
+      limiter.release.value = 0.01;
+
+      // Gain boost node
+      var gainNode = offlineCtx.createGain();
+      gainNode.gain.value = gainLinear;
+
+      // Chain: source -> hpf -> comp -> gainNode -> limiter -> destination
+      source.connect(hpf);
+      hpf.connect(comp);
+      comp.connect(gainNode);
+      gainNode.connect(limiter);
+      limiter.connect(offlineCtx.destination);
+
+      source.start(0);
+      var renderedBuffer = await offlineCtx.startRendering();
+
+      // Encode to WAV
+      var wavBlob = audioBufferToWav(renderedBuffer);
+      var baseName = file.name.replace(/\.[^.]+$/, "");
+      var url = URL.createObjectURL(wavBlob);
+      var a = document.createElement("a");
+      a.href = url;
+      a.download = baseName + "-mastered.wav";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function() { URL.revokeObjectURL(url); }, 10000);
+    } catch(e) {
+      setMasteringError((e && e.message) ? e.message : "Mastering failed. Try a shorter file or different format.");
+    }
+    setMastering(false);
+  }, [file, results]);
 
   var analyze = useCallback(async function(f) {
     if (!f) return;
@@ -2537,6 +2662,13 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode, user }) {
                 <input ref={fileRef2} type="file" onChange={onPick} style={{ display:"none" }} />
               </label>
             </div>
+            <div style={{ textAlign:"center", marginTop:10 }}>
+              <label style={{ display:"inline-flex", alignItems:"center", gap:8, background:"#0d1017", border:"1px solid #2a3040", borderRadius:8, padding:"8px 16px", cursor:"pointer" }}>
+                <span style={{ fontSize:12, color:"#ffb347", fontFamily:"sans-serif", fontWeight:600 }}>+ Add to Setlist</span>
+                <input type="file" accept="audio/*,.mp3,.wav,.aac,.m4a,.flac,.ogg" onChange={function(e) { if (e.target.files[0]) addToSetlist(e.target.files[0]); e.target.value = ""; }} style={{ display:"none" }} />
+              </label>
+              <div style={{ fontSize:11, color:"#2a3040", fontFamily:"sans-serif", marginTop:4 }}>Queue files to analyze one at a time</div>
+            </div>
           </div>
         )}
 
@@ -3023,6 +3155,28 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode, user }) {
                     </div>
                   </div>
                 )}
+                {/* EXPORT MASTERED */}
+                {file && !results.error && results.lufs !== undefined && (
+                  <div style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:16, padding:"18px", marginBottom:18, marginTop:4 }}>
+                    <div style={{ fontSize:10, letterSpacing:3, color:"#ffb347", fontFamily:"monospace", fontWeight:700, marginBottom:10 }}>AUDIO MASTERING</div>
+                    <div style={{ fontSize:12, color:"#6b7280", fontFamily:"sans-serif", marginBottom:12, lineHeight:1.6 }}>
+                      Apply a mastering chain (highpass, compression, limiting) and gain to target -14 LUFS. Downloads as WAV.
+                      {results.lufs !== undefined && (
+                        <span style={{ color:"#ffb347" }}> Boost: {Math.max(0, Math.min(12, Math.round((-14 - results.lufs) * 10) / 10))} dB</span>
+                      )}
+                    </div>
+                    {masteringError && <div style={{ fontSize:12, color:"#ff5757", fontFamily:"sans-serif", marginBottom:8 }}>{masteringError}</div>}
+                    <button onClick={handleExportMastered} disabled={mastering}
+                      style={{ background: mastering ? "#1a1f2e" : "linear-gradient(135deg,#ffb347,#f59e0b)", color: mastering ? "#4a5568" : "#07090f", border:"none", borderRadius:8, padding:"10px 22px", fontSize:13, fontFamily:"sans-serif", fontWeight:700, cursor: mastering ? "not-allowed" : "pointer", display:"flex", alignItems:"center", gap:8 }}>
+                      {mastering ? (
+                        <React.Fragment>
+                          <div style={{ width:14, height:14, border:"2px solid #4a5568", borderTop:"2px solid #ffb347", borderRadius:"50%", animation:"spin 0.7s linear infinite" }} />
+                          Mastering...
+                        </React.Fragment>
+                      ) : "Export Mastered WAV"}
+                    </button>
+                  </div>
+                )}
                 <div style={{ display:"flex", gap:10, flexWrap:"wrap", marginTop:16 }}>
                   <button onClick={reset} style={{ background:"transparent", border:"1px solid #1a1f2e", borderRadius:10, padding:"11px 22px", color:"#6b7280", fontSize:13, fontFamily:"sans-serif", cursor:"pointer" }}>Analyze Another File</button>
                   {isPro && <button onClick={function() { generatePDF(results, file ? file.name : "recording"); }} style={{ background:"linear-gradient(135deg,#4a7cff,#7c3aed)", color:"#fff", border:"none", borderRadius:10, padding:"11px 22px", fontSize:13, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer" }}>Download PDF Report</button>}
@@ -3032,6 +3186,41 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode, user }) {
           </div>
         )}
       </div>
+      {setlistFiles.length > 0 && (
+        <div style={{ maxWidth:820, margin:"24px auto 0", padding:"0 20px 40px" }}>
+          <div style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:16, padding:"18px" }}>
+            <div style={{ fontSize:10, letterSpacing:3, color:"#4a7cff", fontFamily:"monospace", fontWeight:700, marginBottom:14 }}>SETLIST</div>
+            <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+              {setlistFiles.map(function(item) {
+                var sizeMb = (item.size / (1024 * 1024)).toFixed(1);
+                return (
+                  <div key={item.id} style={{ display:"flex", alignItems:"center", gap:12, background:"#060810", border:"1px solid #1a1f2e", borderRadius:10, padding:"12px 14px", flexWrap:"wrap" }}>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontSize:13, fontWeight:700, color:"#e8eaf0", fontFamily:"sans-serif", marginBottom:2, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{item.name}</div>
+                      <div style={{ fontSize:11, color:"#4a5568", fontFamily:"sans-serif" }}>
+                        {sizeMb} MB
+                        {item.analyzed && item.bpm && <span style={{ marginLeft:8, color:"#4a7cff" }}>{item.bpm} BPM</span>}
+                        {item.analyzed && item.key && <span style={{ marginLeft:8, color:"#a78bfa" }}>{item.key}</span>}
+                        {item.analyzed && item.lufs !== null && <span style={{ marginLeft:8, color:"#00e5a0" }}>{item.lufs} LUFS</span>}
+                      </div>
+                    </div>
+                    <div style={{ display:"flex", gap:8, flexShrink:0 }}>
+                      <button onClick={function() { analyze(item.file); }}
+                        style={{ background:"linear-gradient(135deg,#4a7cff,#7c3aed)", color:"#fff", border:"none", borderRadius:7, padding:"7px 14px", fontSize:11, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer" }}>
+                        Analyze
+                      </button>
+                      <button onClick={function() { removeFromSetlist(item.id); }}
+                        style={{ background:"transparent", border:"1px solid #2a3040", borderRadius:7, padding:"7px 10px", fontSize:12, color:"#4a5568", cursor:"pointer", fontFamily:"sans-serif", fontWeight:700, lineHeight:1 }}>
+                        x
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
