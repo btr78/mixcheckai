@@ -613,13 +613,15 @@ function usePro() {
     } catch(e) { return false; }
   })();
   const [isPro, setIsPro] = useState(initPro);
-  const unlockPro = async function(code) {
+  const unlockPro = async function(code, userId) {
     try {
       var deviceId = getDeviceId();
+      var body = { code: code.trim().toUpperCase(), deviceId: deviceId };
+      if (userId) body.userId = userId;
       var resp = await fetch("/api/activate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: code.trim().toUpperCase(), deviceId: deviceId }),
+        body: JSON.stringify(body),
       });
       var data = await resp.json();
       if (resp.ok && data.ok) {
@@ -633,7 +635,7 @@ function usePro() {
       return { ok: false, error: "Network error. Check your connection and try again." };
     }
   };
-  return { isPro, unlockPro };
+  return { isPro, unlockPro, setIsPro };
 }
 
 function useRouter() {
@@ -3022,7 +3024,7 @@ function SuccessPage({ navigate, isPro, unlockPro }) {
               var actResp = await fetch("/api/activate", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ code: data.code, deviceId: getDeviceId(), isTrial: data.isTrial !== false }),
+                body: JSON.stringify({ code: data.code, deviceId: getDeviceId(), isTrial: data.isTrial !== false, userId: (unlockPro && user) ? user.id : undefined }),
               });
               var actData = await actResp.json();
               if (actResp.ok && actData.ok) {
@@ -3308,12 +3310,30 @@ function AppCore({ user }) {
   var routerResult = useRouter();
   var page = routerResult.page; var navigate = routerResult.navigate;
   var proResult = usePro();
-  var isPro = proResult.isPro; var unlockPro = proResult.unlockPro;
+  var isPro = proResult.isPro; var unlockPro = proResult.unlockPro; var setIsPro = proResult.setIsPro;
   var unlockState = useState(false); var showUnlock = unlockState[0]; var setShowUnlock = unlockState[1];
   var modeState = useState("church"); var appMode = modeState[0]; var setAppMode = modeState[1];
 
+  // Auto-sync Pro from user account on login
+  useEffect(function() {
+    if (!user || !user.id) return;
+    if (isPro) return;
+    fetch("/api/check-pro?userId=" + encodeURIComponent(user.id))
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d.isPro) {
+          try { localStorage.setItem("mca_pro_v2", JSON.stringify({ activated:true, lifetime:!!d.lifetime, deviceId:getDeviceId(), ts:Date.now() })); } catch(e) {}
+          setIsPro(true);
+        }
+      })
+      .catch(function() {});
+  }, [user]);
+
+  // Wrap unlockPro to include userId automatically
+  var unlockProWithUser = function(code) { return unlockPro(code, user && user.id); };
+
   var renderPage = function() {
-    var props = { navigate:navigate, isPro:isPro, onUnlockClick:function() { setShowUnlock(true); }, appMode:appMode, unlockPro:unlockPro, user:user };
+    var props = { navigate:navigate, isPro:isPro, onUnlockClick:function() { setShowUnlock(true); }, appMode:appMode, unlockPro:unlockProWithUser, user:user };
     if (page === "home")      return React.createElement(HomePage, props);
     if (page === "analyze")   return React.createElement(AnalyzePage, props);
     if (page === "pricing")   return React.createElement(PricingPage, props);
@@ -3330,7 +3350,7 @@ function AppCore({ user }) {
       <Nav navigate={navigate} page={page} isPro={isPro} onUnlockClick={function() { setShowUnlock(true); }} appMode={appMode} setAppMode={setAppMode} />
       {renderPage()}
       {page !== "success" && <Footer navigate={navigate} />}
-      {showUnlock && <ProUnlockModal onClose={function() { setShowUnlock(false); }} onUnlock={unlockPro} />}
+      {showUnlock && <ProUnlockModal onClose={function() { setShowUnlock(false); }} onUnlock={unlockProWithUser} />}
     </div>
   );
 }

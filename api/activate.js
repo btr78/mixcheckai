@@ -13,79 +13,103 @@ export default async function handler(req, res) {
   var body = req.body || {};
   var code = (body.code || "").trim().toUpperCase();
   var deviceId = (body.deviceId || "").trim();
-  var isTrial = body.isTrial !== false; // default true; false = immediate-pay, skip trial limits
+  var userId = (body.userId || "").trim();
+  var isTrial = body.isTrial !== false;
 
   if (!code || !deviceId) {
     return res.status(400).json({ error: "Missing code or device info" });
   }
 
+  var KV_URL = process.env.KV_REST_API_URL;
+  var KV_TOKEN = process.env.KV_REST_API_TOKEN;
+
+  var kvPost = async function(command) {
+    var r = await fetch(KV_URL, {
+      method: "POST",
+      headers: { "Authorization": "Bearer " + KV_TOKEN, "Content-Type": "application/json" },
+      body: JSON.stringify(command),
+    });
+    return r.json();
+  };
+
+  // Save Pro status to user account so it follows their login everywhere
+  var saveUserPro = async function(lifetime) {
+    if (!userId || !KV_URL || !KV_TOKEN) return;
+    try {
+      await kvPost(["SET", "user_pro:" + userId, JSON.stringify({
+        isPro: true, lifetime: !!lifetime, code: code, activatedAt: new Date().toISOString()
+      })]);
+    } catch(e) {}
+  };
+
+  // If user is logged in and already has Pro on their account, grant immediately
+  if (userId && KV_URL && KV_TOKEN) {
+    try {
+      var existing = await kvPost(["GET", "user_pro:" + userId]);
+      if (existing.result) {
+        var existingData = {};
+        try { existingData = JSON.parse(existing.result); } catch(e) {}
+        if (existingData.isPro) {
+          return res.status(200).json({ ok: true, lifetime: !!existingData.lifetime });
+        }
+      }
+    } catch(e) {}
+  }
+
   // ── Master lifetime code (no device binding) ────────────────────────────────
   var master = (process.env.MASTER_PRO_CODE || "").trim().toUpperCase();
   if (master && code === master) {
-    // Store lifetime flag in KV so stems.js can verify server-side
     var KV_URL2 = process.env.KV_REST_API_URL;
     var KV_TOKEN2 = process.env.KV_REST_API_TOKEN;
     if (deviceId && KV_URL2 && KV_TOKEN2) {
       fetch(KV_URL2, { method:"POST", headers:{ "Authorization":"Bearer "+KV_TOKEN2, "Content-Type":"application/json" }, body:JSON.stringify(["SET","lifetime:"+deviceId,"1"]) }).catch(function(){});
     }
+    await saveUserPro(true);
     return res.status(200).json({ ok: true, lifetime: true });
   }
 
   // ── Device-locked codes via Vercel KV ───────────────────────────────────────
-  var KV_URL = process.env.KV_REST_API_URL;
-  var KV_TOKEN = process.env.KV_REST_API_TOKEN;
-
   if (!KV_URL || !KV_TOKEN) {
     return res.status(400).json({ error: "Invalid code" });
   }
 
   try {
-    var kvPost = async function(command) {
-      var r = await fetch(KV_URL, {
-        method: "POST",
-        headers: { "Authorization": "Bearer " + KV_TOKEN, "Content-Type": "application/json" },
-        body: JSON.stringify(command),
-      });
-      return r.json();
-    };
-
-    // Look up the code
     var getResult = await kvPost(["GET", "code:" + code]);
-    var stored = getResult.result; // null = not found | "unbound" = available | "device:xxx" = bound
+    var stored = getResult.result;
 
     if (stored === null || stored === undefined) {
       return res.status(400).json({ error: "Invalid code" });
     }
 
     if (stored === "unbound") {
-      // First use — bind to this device permanently
       await kvPost(["SET", "code:" + code, "device:" + deviceId]);
-      // Check if this code is marked as lifetime
       var isLifetimeCode = (await kvPost(["GET", "lifetime_code:" + code])).result === "1";
       if (isLifetimeCode) {
         await kvPost(["SET", "lifetime:" + deviceId, "1"]);
+        await saveUserPro(true);
         return res.status(200).json({ ok: true, lifetime: true });
       }
-      // Only set trial flag for trial subscribers; immediate-pay users get unlimited stems
       if (isTrial) {
         await kvPost(["SET", "trial:" + deviceId, "1", "EX", 691200]);
       }
+      await saveUserPro(false);
       return res.status(200).json({ ok: true, lifetime: false });
     }
 
     if (stored === "device:" + deviceId) {
-      // Same device re-activating — re-grant lifetime if applicable
       var isLifetimeCode2 = (await kvPost(["GET", "lifetime_code:" + code])).result === "1";
       if (isLifetimeCode2) {
         await kvPost(["SET", "lifetime:" + deviceId, "1"]);
+        await saveUserPro(true);
         return res.status(200).json({ ok: true, lifetime: true });
       }
+      await saveUserPro(false);
       return res.status(200).json({ ok: true, lifetime: false });
     }
 
-    // Different device — reject
+    // Different device — if logged in, let account Pro check above handle it
     return res.status(403).json({
-      error: "This code is already activated on another device. Email hello@mixcheckai.com to reset it.",
+      error: "This code is already activated on another device. Sign in to your account to access Pro, or email hello@mixcheckai.com to reset it.",
     });
 
   } catch (err) {
