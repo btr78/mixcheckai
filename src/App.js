@@ -568,34 +568,39 @@ function decodeAudioDataSafe(ctx, arrayBuffer) {
     });
   });
 }
-// iOS Safari may not expose FileReader as a global — use blob.arrayBuffer() first
 async function readBlobAsArrayBuffer(blob) {
-  if (blob.arrayBuffer) return blob.arrayBuffer();
+  // Try native arrayBuffer() first (all modern browsers), fall through to FileReader
+  if (blob.arrayBuffer) {
+    try { return await blob.arrayBuffer(); } catch(e) {}
+  }
+  var FR = window.FileReader || (typeof FileReader !== "undefined" ? FileReader : null);
+  if (!FR) throw new Error("Cannot read file — please try a different browser.");
   return new Promise(function(resolve, reject) {
-    var FR = window.FileReader;
-    if (!FR) { reject(new Error("FileReader not supported on this browser")); return; }
     var r = new FR();
-    r.onerror = function() { reject(new Error("Read error")); };
+    r.onerror = function() { reject(new Error("File read failed. Try a different file or browser.")); };
     r.onload = function(e) { resolve(e.target.result); };
     r.readAsArrayBuffer(blob);
   });
 }
 async function readFileAsDataURL(file) {
-  var FR = window.FileReader;
-  if (FR) {
+  // Use arrayBuffer + manual base64 — works on all browsers including iOS Chrome
+  try {
+    var ab = await readBlobAsArrayBuffer(file);
+    var bytes = new Uint8Array(ab); var binary = ""; var chunk = 0x8000;
+    for (var i = 0; i < bytes.length; i += chunk)
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+    return "data:" + (file.type || "audio/mpeg") + ";base64," + btoa(binary);
+  } catch(e) {
+    // Last resort: FileReader readAsDataURL
+    var FR = window.FileReader || (typeof FileReader !== "undefined" ? FileReader : null);
+    if (!FR) throw new Error("Cannot read file — please try a different browser.");
     return new Promise(function(resolve, reject) {
       var r = new FR();
-      r.onerror = reject;
-      r.onload = function(e) { resolve(e.target.result); };
+      r.onerror = function() { reject(new Error("File read failed.")); };
+      r.onload = function(ev) { resolve(ev.target.result); };
       r.readAsDataURL(file);
     });
   }
-  // Fallback for browsers without FileReader global
-  var ab = await readBlobAsArrayBuffer(file);
-  var bytes = new Uint8Array(ab); var binary = ""; var chunk = 0x8000;
-  for (var i = 0; i < bytes.length; i += chunk)
-    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
-  return "data:" + (file.type || "audio/mpeg") + ";base64," + btoa(binary);
 }
 
 function usePro() {
@@ -1745,8 +1750,10 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode, user }) {
       setStep(4);
     } catch(err) {
       var errText = (err && err.message) ? err.message : "Could not analyze. Try an MP3 or WAV file.";
-      if (errText.indexOf("expected pattern") !== -1 || errText.indexOf("Unable to decode") !== -1) {
-        errText = "Could not decode audio on this device. Try a shorter clip (under 5 min) exported as MP3.";
+      if (errText.indexOf("expected pattern") !== -1 || errText.indexOf("Unable to decode") !== -1 ||
+          errText.indexOf("Failed to decode") !== -1 || errText.indexOf("EncodingError") !== -1 ||
+          errText.indexOf("decode audio") !== -1) {
+        errText = "Could not decode this audio file. Please export as MP3 or WAV and try again.";
       }
       setResults({ error: errText });
       setStep(4);
