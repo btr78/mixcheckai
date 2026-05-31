@@ -609,6 +609,7 @@ function usePro() {
       var d = JSON.parse(localStorage.getItem("mca_pro_v2") || "{}");
       if (!d.activated) return false;
       if (d.lifetime) return true;
+      if (d.expiresAt && Date.now() > d.expiresAt) return false; // expired trial
       return d.deviceId === getDeviceId();
     } catch(e) { return false; }
   })();
@@ -626,6 +627,7 @@ function usePro() {
       var data = await resp.json();
       if (resp.ok && data.ok) {
         var saved = { activated: true, lifetime: !!data.lifetime, deviceId: deviceId, ts: Date.now() };
+        if (data.expiresAt) saved.expiresAt = data.expiresAt;
         try { localStorage.setItem("mca_pro_v2", JSON.stringify(saved)); } catch(e) {}
         setIsPro(true);
         return { ok: true };

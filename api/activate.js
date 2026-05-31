@@ -89,11 +89,15 @@ export default async function handler(req, res) {
         await saveUserPro(true);
         return res.status(200).json({ ok: true, lifetime: true });
       }
+      // Check for custom duration (e.g. 3-day test codes)
+      var durationResult = await kvPost(["GET", "code_duration:" + code]);
+      var durationSecs = durationResult.result ? parseInt(durationResult.result, 10) : null;
+      var expiresAt = durationSecs ? Date.now() + durationSecs * 1000 : null;
       if (isTrial) {
-        await kvPost(["SET", "trial:" + deviceId, "1", "EX", 691200]);
+        await kvPost(["SET", "trial:" + deviceId, "1", "EX", durationSecs || 691200]);
       }
       await saveUserPro(false);
-      return res.status(200).json({ ok: true, lifetime: false });
+      return res.status(200).json({ ok: true, lifetime: false, expiresAt: expiresAt });
     }
 
     if (stored === "device:" + deviceId) {
