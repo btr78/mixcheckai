@@ -886,6 +886,7 @@ async function decodeSlice(blob) {
     var ab = await readBlobAsArrayBuffer(blob);
     var AudioCtxClass = window.AudioContext || window.webkitAudioContext;
     var ctx = new AudioCtxClass();
+    try { await ctx.resume(); } catch(e) {}
     var buf;
     try { buf = await decodeAudioDataSafe(ctx, ab); }
     catch(de) { ctx.close(); return null; }
@@ -1900,6 +1901,7 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode, user }) {
     var AudioCtxClass = window.AudioContext || window.webkitAudioContext;
     if (!AudioCtxClass) return;
     var ctx = new AudioCtxClass();
+    try { ctx.resume(); } catch(e) {}
     var gainNode = ctx.createGain();
     gainNode.gain.value = clickMuted ? 0.0 : 1.0;
     gainNode.connect(ctx.destination);
