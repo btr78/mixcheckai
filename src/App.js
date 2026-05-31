@@ -626,7 +626,7 @@ function usePro() {
       });
       var data = await resp.json();
       if (resp.ok && data.ok) {
-        var saved = { activated: true, lifetime: !!data.lifetime, deviceId: deviceId, ts: Date.now() };
+        var saved = { activated: true, lifetime: !!data.lifetime, deviceId: deviceId, ts: Date.now(), code: code.trim().toUpperCase() };
         if (data.expiresAt) saved.expiresAt = data.expiresAt;
         try { localStorage.setItem("mca_pro_v2", JSON.stringify(saved)); } catch(e) {}
         setIsPro(true);
@@ -2376,13 +2376,16 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode, user }) {
         var sr = await fetch("/api/stems-status?id=" + lyricsPredIdRef.current);
         var sd = await sr.json();
         if (sd.status === "succeeded") {
-          if (sd.output && typeof sd.output === "object" && sd.output.segments && sd.output.segments.length > 0) {
-            setLyrics({ text: sd.output.transcription || sd.output.text || "", segments: sd.output.segments });
-          } else if (typeof sd.output === "string") {
-            setLyrics({ text: sd.output, segments: [] });
-          } else {
-            setLyrics({ text: (sd.output && sd.output.transcription) || (sd.output && sd.output.text) || JSON.stringify(sd.output), segments: [] });
+          var rawOut = sd.output;
+          var lyrText = "";
+          var lyrSegs = [];
+          if (rawOut && typeof rawOut === "object") {
+            lyrText = String(rawOut.transcription || rawOut.text || "");
+            lyrSegs = Array.isArray(rawOut.segments) ? rawOut.segments : [];
+          } else if (typeof rawOut === "string") {
+            lyrText = rawOut;
           }
+          setLyrics({ text: lyrText, segments: lyrSegs });
           setLyricsLoading(false);
           return;
         }
@@ -2912,7 +2915,7 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode, user }) {
                           <div style={{ fontSize:12, color:"#00e5a0", fontFamily:"sans-serif", fontWeight:700 }}>Stems ready — mute any track to practice your part:</div>
                           {stemSaveStatus === "saving" && <div style={{ fontSize:11, color:"#6b7280", fontFamily:"sans-serif" }}>☁️ Saving to your account…</div>}
                           {stemSaveStatus === "saved"  && <div style={{ fontSize:11, color:"#00e5a0", fontFamily:"sans-serif" }}>☁️ Saved to your account ✓</div>}
-                          {stemSaveStatus === "error"  && <div style={{ fontSize:11, color:"#ff5757", fontFamily:"sans-serif" }}>⚠ Could not save (Blob not set up)</div>}
+                          {stemSaveStatus === "error"  && <div style={{ fontSize:11, color:"#ffb347", fontFamily:"sans-serif" }}>⚠ Stems not saved to cloud (available this session only)</div>}
                         </div>
                         <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))", gap:10, marginBottom:14 }}>
                           {["vocals","drums","bass","guitar","piano","other"].filter(function(k){ return stemOutputs[k]; }).map(function(k) {
@@ -3968,7 +3971,21 @@ function AppCore({ user }) {
   // Auto-sync Pro from user account on login
   useEffect(function() {
     if (!user || !user.id) return;
-    if (isPro) return;
+    if (isPro) {
+      // Device already has Pro — silently link the code to this account so it follows login everywhere
+      try {
+        var stored = JSON.parse(localStorage.getItem("mca_pro_v2") || "{}");
+        if (stored.code) {
+          fetch("/api/activate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ code: stored.code, deviceId: getDeviceId(), userId: user.id }),
+          }).catch(function() {});
+        }
+      } catch(e) {}
+      return;
+    }
+    // Not Pro on this device — check if their account has Pro
     fetch("/api/check-pro?userId=" + encodeURIComponent(user.id))
       .then(function(r) { return r.json(); })
       .then(function(d) {
