@@ -246,6 +246,7 @@ function HistoryPage({ navigate, user }) {
               {savedStems.map(function(entry, i) {
                 var TRACK_COLORS = { vocals:"#00e5a0", drums:"#ff5757", bass:"#4a7cff", guitar:"#f59e0b", piano:"#a78bfa", other:"#ffb347" };
                 var TRACK_ICONS  = { vocals:"🎤", drums:"🥁", bass:"🎸", guitar:"🎵", piano:"🎹", other:"🎶" };
+                var TRACK_LABELS = { vocals:"Vocals", drums:"Drums", bass:"Bass", guitar:"Guitar (ac + el)", piano:"Keys / Piano", other:"Other" };
                 var date = entry.date ? new Date(entry.date).toLocaleDateString() : "";
                 return (
                   <div key={i} style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:14, padding:"18px 20px" }}>
@@ -264,7 +265,7 @@ function HistoryPage({ navigate, user }) {
                           <a key={track} href={url} download={track + ".mp3"} target="_blank" rel="noopener noreferrer"
                             style={{ display:"flex", alignItems:"center", gap:6, background:"rgba(255,255,255,0.04)", border:"1px solid "+col+"33", borderRadius:8, padding:"8px 12px", textDecoration:"none", color:col, fontSize:12, fontFamily:"sans-serif", fontWeight:600 }}>
                             <span>{TRACK_ICONS[track] || "🎵"}</span>
-                            <span>{track.charAt(0).toUpperCase()+track.slice(1)}</span>
+                            <span>{TRACK_LABELS[track] || (track.charAt(0).toUpperCase()+track.slice(1))}</span>
                             <span style={{ fontSize:10, color:"#4a5568" }}>↓</span>
                           </a>
                         );
@@ -2919,14 +2920,14 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode, user }) {
                         </div>
                         <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))", gap:10, marginBottom:14 }}>
                           {["vocals","drums","bass","guitar","piano","other"].filter(function(k){ return stemOutputs[k]; }).map(function(k) {
-                            var LABELS = { drums:"Drums", bass:"Bass", vocals:"Vocals", guitar:"Guitar", piano:"Keys / Piano", other:"Other" };
+                            var LABELS = { drums:"Drums", bass:"Bass", vocals:"Vocals", guitar:"Guitar (ac + el)", piano:"Keys / Piano", other:"Other" };
                             var ICONS  = { drums:"🥁", bass:"🎸", vocals:"🎤", guitar:"🎵", piano:"🎹", other:"🎶" };
                             var COLORS = { drums:"#ff5757", bass:"#4a7cff", vocals:"#00e5a0", guitar:"#f59e0b", piano:"#a78bfa", other:"#ffb347" };
                             var isMuted = !!stemMuted[k];
                             var col = COLORS[k];
                             return (
                               <div key={k} style={{ background: isMuted?"#0a0c14":"rgba(10,12,20,0.9)", border:"1px solid "+(isMuted?"#1a1f2e":col+"44"), borderRadius:12, padding:"14px 12px", opacity: isMuted?0.45:1, transition:"all 0.15s" }}>
-                                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+                                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:k==="guitar"?4:10 }}>
                                   <div style={{ display:"flex", alignItems:"center", gap:6 }}>
                                     <span style={{ fontSize:18 }}>{ICONS[k]}</span>
                                     <span style={{ fontSize:12, fontWeight:700, color: isMuted?"#4a5568":col, fontFamily:"sans-serif" }}>{LABELS[k]}</span>
@@ -2938,6 +2939,7 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode, user }) {
                                     ↓
                                   </a>
                                 </div>
+                                {k==="guitar" && <div style={{ fontSize:9, color:"#4a5568", fontFamily:"sans-serif", marginBottom:8, lineHeight:1.4 }}>Acoustic &amp; electric combined — the AI cannot separate them</div>}
                                 <button onClick={function(){handleStemMute(k);}}
                                   style={{ width:"100%", border:"1px solid "+(isMuted?"#2a3040":col+"55"), borderRadius:7, padding:"8px 6px", fontSize:11, fontFamily:"sans-serif", fontWeight:700, cursor:"pointer", background: isMuted?"transparent":col+"18", color: isMuted?"#4a5568":col, transition:"all 0.15s", letterSpacing:0.5 }}>
                                   {isMuted ? "MUTED — tap to unmute" : "MUTE"}
