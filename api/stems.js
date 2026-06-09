@@ -110,8 +110,8 @@ export default async function handler(req, res) {
       }
     }
 
-    // TEMP: reverted to stock htdemucs_6s (fast) while our fine-tuned model's GPU
-    // image is rebuilt. Swap back to 054b0fd4... once verified GPU-fast.
+    // Our fine-tuned HTDemucs 6s (btr78/mixcheck-stems, val SI-SDR -8.65), GPU,
+    // returns a LIST of 6 MP3 stems (stem name in each filename). ~30-55s/song.
     var response = await fetch("https://api.replicate.com/v1/predictions", {
       method: "POST",
       headers: {
@@ -119,14 +119,9 @@ export default async function handler(req, res) {
         "Authorization": "Token " + process.env.REPLICATE_API_TOKEN,
       },
       body: JSON.stringify({
-        version: "25a173108cff36ef9f80f854c162d01df9e6528be175794b81158fa03836d953",
+        version: "dc46a663fcb5e3b29a94695fc5830c5c9d235faeb6efe747cd4ae4c7403ca339",
         input: {
           audio: audioBase64,
-          model: "htdemucs_6s",
-          clip_mode: "rescale",
-          shifts: 2,
-          overlap: 0.25,
-          jobs: 0,
         },
       }),
     });
