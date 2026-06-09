@@ -3978,7 +3978,7 @@ function AppCore({ user }) {
     var deviceId = getDeviceId();
     var cancelled = false;
     var post = function(action) {
-      return fetch("/api/session", {
+      return fetch("/api/check-pro", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId: user.id, deviceId: deviceId, action: action }),
       }).then(function(r) { return r.json(); }).catch(function() { return { ok: true, active: true }; });
@@ -3990,7 +3990,7 @@ function AppCore({ user }) {
       post("heartbeat").then(function(d) { if (!cancelled) setSessionActive(d.active !== false); });
     }, 60000);
     var onUnload = function() {
-      try { navigator.sendBeacon && navigator.sendBeacon("/api/session", new Blob([JSON.stringify({ userId: user.id, deviceId: deviceId, action: "release" })], { type: "application/json" })); } catch(e) {}
+      try { navigator.sendBeacon && navigator.sendBeacon("/api/check-pro", new Blob([JSON.stringify({ userId: user.id, deviceId: deviceId, action: "release" })], { type: "application/json" })); } catch(e) {}
     };
     window.addEventListener("beforeunload", onUnload);
     return function() { cancelled = true; clearInterval(iv); window.removeEventListener("beforeunload", onUnload); };
