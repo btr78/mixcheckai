@@ -88,7 +88,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // Create prediction using cjwbw/demucs htdemucs model
+    // Create prediction using our fine-tuned HTDemucs 6s (btr78/mixcheck-stems, val SI-SDR -8.65)
     var response = await fetch("https://api.replicate.com/v1/predictions", {
       method: "POST",
       headers: {
@@ -96,14 +96,9 @@ export default async function handler(req, res) {
         "Authorization": "Token " + process.env.REPLICATE_API_TOKEN,
       },
       body: JSON.stringify({
-        version: "25a173108cff36ef9f80f854c162d01df9e6528be175794b81158fa03836d953",
+        version: "054b0fd4df10ba19de4c438f9bf20f46afbaca2f7be4a19958a6ff8732554f2a",
         input: {
           audio: audioBase64,
-          model: "htdemucs_6s",
-          clip_mode: "rescale",
-          shifts: 2,
-          overlap: 0.25,
-          jobs: 0,
         },
       }),
     });
