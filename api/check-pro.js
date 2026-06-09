@@ -25,24 +25,10 @@ export default async function handler(req, res) {
     return r.json();
   };
 
-  // ── POST: session enforcement (+ temp seed) ─────────────────────────────────
+  // ── POST: session enforcement ───────────────────────────────────────────────
   if (req.method === "POST") {
     var body = req.body || {};
     var action = (body.action || "claim").trim();
-
-    // TEMP guarded seeder — REMOVE THIS BLOCK after creating the test code.
-    if (action === "seed") {
-      if ((body.key || "") !== "qz7K2m9XpL4vTn8w") return res.status(403).json({ error: "forbidden" });
-      if (!KV_URL || !KV_TOKEN) return res.status(500).json({ error: "KV not configured" });
-      var sc = (body.code || "MIXTEST7").trim().toUpperCase();
-      var sdays = Math.max(1, parseInt(body.days || "7", 10));
-      try {
-        await kv(["SET", "code:" + sc, "unbound"]);
-        await kv(["SET", "code_duration:" + sc, String(sdays * 86400)]);
-        return res.status(200).json({ ok: true, code: sc, days: sdays });
-      } catch (e) { return res.status(500).json({ error: String(e) }); }
-    }
-
     var userId = (body.userId || "").trim();
     var deviceId = (body.deviceId || "").trim();
     if (!userId || !deviceId || !KV_URL || !KV_TOKEN) return res.status(200).json({ ok: true, active: true });
