@@ -2085,7 +2085,7 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode, user }) {
       var resp = await fetch("/api/stems", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ audioBase64: dataUrl, deviceId: getDeviceId(), isTrial: trial.isTrial, creditsNeeded: creditsNeeded }),
+        body: JSON.stringify({ audioBase64: dataUrl, deviceId: getDeviceId(), isTrial: trial.isTrial, creditsNeeded: creditsNeeded, userId: (user && user.id) || "" }),
       });
       var data = await resp.json();
       if (!resp.ok) { errMsg = data.error || "Server error"; throw new Error(errMsg); }

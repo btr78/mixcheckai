@@ -14,6 +14,7 @@ export default async function handler(req, res) {
     var body = req.body;
     var audioBase64 = body.audioBase64;
     var deviceId = (body.deviceId || "").trim();
+    var userId = (body.userId || "").trim();
     var isTrial = !!body.isTrial;
     // Credits to deduct: 1 per 5 min of audio (client calculates, server validates)
     var creditsNeeded = Math.max(1, Math.min(20, parseInt(body.creditsNeeded || "1", 10)));
@@ -29,6 +30,27 @@ export default async function handler(req, res) {
     var MONTHLY_LIMIT = 10;
     var KV_URL = process.env.KV_REST_API_URL;
     var KV_TOKEN = process.env.KV_REST_API_TOKEN;
+
+    // Single-device enforcement (server-side, FAIL-OPEN): block only when we're
+    // certain another device holds a fresh session lock for this account.
+    if (userId && deviceId && KV_URL && KV_TOKEN) {
+      try {
+        var lockR = await fetch(KV_URL, {
+          method: "POST",
+          headers: { "Authorization": "Bearer " + KV_TOKEN, "Content-Type": "application/json" },
+          body: JSON.stringify(["GET", "session_lock:" + userId]),
+        });
+        var lockD = await lockR.json();
+        if (lockD && lockD.result) {
+          var lock = null;
+          try { lock = JSON.parse(lockD.result); } catch (e) {}
+          // Fresh lock (within 150s TTL anyway) held by a DIFFERENT device → block.
+          if (lock && lock.deviceId && lock.deviceId !== deviceId) {
+            return res.status(409).json({ error: "Your Pro account is active on another device. Only one device can separate stems at a time — open MixCheck AI there, or refresh here to take over." });
+          }
+        }
+      } catch (e) { /* fail open — never block on infra error */ }
+    }
 
     if (deviceId && KV_URL && KV_TOKEN) {
       var kvPost = async function(cmd) {
