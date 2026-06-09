@@ -3969,6 +3969,32 @@ function AppCore({ user }) {
   var isPro = proResult.isPro; var unlockPro = proResult.unlockPro; var setIsPro = proResult.setIsPro;
   var unlockState = useState(false); var showUnlock = unlockState[0]; var setShowUnlock = unlockState[1];
   var modeState = useState("church"); var appMode = modeState[0]; var setAppMode = modeState[1];
+  // Single-device session: true = this device is the active one. Fail-open default true.
+  var sessionState = useState(true); var sessionActive = sessionState[0]; var setSessionActive = sessionState[1];
+
+  // Single-device enforcement: claim session on login, heartbeat, displace if another device takes over.
+  useEffect(function() {
+    if (!user || !user.id) { setSessionActive(true); return; }
+    var deviceId = getDeviceId();
+    var cancelled = false;
+    var post = function(action) {
+      return fetch("/api/session", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: user.id, deviceId: deviceId, action: action }),
+      }).then(function(r) { return r.json(); }).catch(function() { return { ok: true, active: true }; });
+    };
+    // Claim this device as active (newest wins).
+    post("claim").then(function(d) { if (!cancelled) setSessionActive(d.active !== false); });
+    // Heartbeat every 60s; if another device took over, this one is displaced.
+    var iv = setInterval(function() {
+      post("heartbeat").then(function(d) { if (!cancelled) setSessionActive(d.active !== false); });
+    }, 60000);
+    var onUnload = function() {
+      try { navigator.sendBeacon && navigator.sendBeacon("/api/session", new Blob([JSON.stringify({ userId: user.id, deviceId: deviceId, action: "release" })], { type: "application/json" })); } catch(e) {}
+    };
+    window.addEventListener("beforeunload", onUnload);
+    return function() { cancelled = true; clearInterval(iv); window.removeEventListener("beforeunload", onUnload); };
+  }, [user]);
 
   // Auto-sync Pro from user account on login
   useEffect(function() {
@@ -4002,8 +4028,12 @@ function AppCore({ user }) {
   // Wrap unlockPro to include userId automatically
   var unlockProWithUser = function(code) { return unlockPro(code, user && user.id); };
 
+  // Effective Pro = has Pro AND this device is the active session. Displaced devices lose Pro until they reclaim (refresh/login).
+  var effectivePro = isPro && sessionActive;
+  var displaced = isPro && !sessionActive;
+
   var renderPage = function() {
-    var props = { navigate:navigate, isPro:isPro, onUnlockClick:function() { setShowUnlock(true); }, appMode:appMode, unlockPro:unlockProWithUser, user:user };
+    var props = { navigate:navigate, isPro:effectivePro, onUnlockClick:function() { setShowUnlock(true); }, appMode:appMode, unlockPro:unlockProWithUser, user:user };
     if (page === "home")      return React.createElement(HomePage, props);
     if (page === "analyze")   return React.createElement(AnalyzePage, props);
     if (page === "pricing")   return React.createElement(PricingPage, props);
@@ -4017,7 +4047,13 @@ function AppCore({ user }) {
 
   return (
     <div>
-      <Nav navigate={navigate} page={page} isPro={isPro} onUnlockClick={function() { setShowUnlock(true); }} appMode={appMode} setAppMode={setAppMode} />
+      <Nav navigate={navigate} page={page} isPro={effectivePro} onUnlockClick={function() { setShowUnlock(true); }} appMode={appMode} setAppMode={setAppMode} />
+      {displaced && (
+        <div style={{ background:"#7a1f1f", color:"#fff", padding:"10px 16px", textAlign:"center", fontSize:13, fontFamily:"monospace" }}>
+          Your Pro account is active on another device. Only one device can use Pro at a time.
+          <span onClick={function(){ window.location.reload(); }} style={{ textDecoration:"underline", cursor:"pointer", marginLeft:8 }}>Use Pro here</span>
+        </div>
+      )}
       {renderPage()}
       {page !== "success" && <Footer navigate={navigate} />}
       {showUnlock && <ProUnlockModal onClose={function() { setShowUnlock(false); }} onUnlock={unlockProWithUser} />}
