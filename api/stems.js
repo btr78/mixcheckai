@@ -119,7 +119,7 @@ export default async function handler(req, res) {
         "Authorization": "Token " + process.env.REPLICATE_API_TOKEN,
       },
       body: JSON.stringify({
-        version: "dc46a663fcb5e3b29a94695fc5830c5c9d235faeb6efe747cd4ae4c7403ca339",
+        version: "97d3fe346e0f03e6a36c77d5781d1bfb8ee8d49fa477a0dd0180529ab8fdf9b4",
         input: {
           audio: audioBase64,
         },

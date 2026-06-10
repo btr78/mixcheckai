@@ -37,11 +37,11 @@ export default async function handler(req, res) {
       var raw = prediction.output;
       if (Array.isArray(raw)) {
         output = {};
-        var stemOrder = ["drums", "bass", "vocals", "guitar", "piano", "other"];
+        var stemOrder = ["drums", "bass", "other", "vocals", "guitar", "piano", "automix"];
         raw.forEach(function(url, i) {
           var key = stemOrder[i] || ("stem" + (i + 1));
           // Try to extract stem name from URL filename if possible
-          var match = url.match(/[/_-](drums|bass|vocals|guitar|piano|other)[._/-]/i);
+          var match = url.match(/[/_-](drums|bass|vocals|guitar|piano|other|automix)[._/-]/i);
           if (match) key = match[1].toLowerCase();
           output[key] = url;
         });

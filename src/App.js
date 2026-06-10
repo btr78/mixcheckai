@@ -2133,6 +2133,7 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode, user }) {
     if (!stemOutputs) return;
     var created = [];
     Object.keys(stemOutputs).forEach(function(k) {
+      if (k === "automix") return;   // auto-mix has its own player card; not part of the multitrack engine
       var a = new Audio(stemOutputs[k]);
       a.crossOrigin = "anonymous";
       stemAudioRefs.current[k] = a;
@@ -2276,7 +2277,7 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode, user }) {
     var ctx = stemPitchCtxRef.current;
     try { await ctx.resume(); } catch(e) {}
 
-    var keys = Object.keys(stemOutputs);
+    var keys = Object.keys(stemOutputs).filter(function(k){ return k !== "automix"; });
     for (var ki = 0; ki < keys.length; ki++) {
       var k = keys[ki];
       if (!stemPitchBuffersRef.current[k]) {
@@ -2918,6 +2919,22 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode, user }) {
                           {stemSaveStatus === "saved"  && <div style={{ fontSize:11, color:"#00e5a0", fontFamily:"sans-serif" }}>☁️ Saved to your account ✓</div>}
                           {stemSaveStatus === "error"  && <div style={{ fontSize:11, color:"#ffb347", fontFamily:"sans-serif" }}>⚠ Stems not saved to cloud (available this session only)</div>}
                         </div>
+                        {stemOutputs.automix && (
+                          <div style={{ background:"linear-gradient(135deg, rgba(0,229,160,0.12), rgba(74,124,255,0.12))", border:"1px solid #00e5a055", borderRadius:12, padding:"16px 14px", marginBottom:14 }}>
+                            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:10 }}>
+                              <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                                <span style={{ fontSize:22 }}>✨</span>
+                                <div>
+                                  <div style={{ fontSize:13, fontWeight:800, color:"#00e5a0", fontFamily:"sans-serif" }}>AI Auto-Mix</div>
+                                  <div style={{ fontSize:10, color:"#6b7280", fontFamily:"sans-serif" }}>Your stems rebalanced &amp; mastered by AI — listen or download</div>
+                                </div>
+                              </div>
+                              <a href={stemOutputs.automix} download="ai-automix.mp3" target="_blank" rel="noopener noreferrer"
+                                style={{ fontSize:11, fontWeight:700, color:"#0a0c14", background:"#00e5a0", borderRadius:7, padding:"8px 14px", textDecoration:"none", fontFamily:"sans-serif" }}>↓ Download</a>
+                            </div>
+                            <audio controls preload="none" src={stemOutputs.automix} style={{ width:"100%", marginTop:12, height:36 }} />
+                          </div>
+                        )}
                         <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))", gap:10, marginBottom:14 }}>
                           {["vocals","drums","bass","guitar","piano","other"].filter(function(k){ return stemOutputs[k]; }).map(function(k) {
                             var LABELS = { drums:"Drums", bass:"Bass", vocals:"Vocals", guitar:"Guitar (ac + el)", piano:"Keys / Piano", other:"Other" };
