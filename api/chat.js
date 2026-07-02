@@ -11,6 +11,8 @@
 // the request body.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { verifiedUserId } from "../lib/auth.js";
+
 var FREE_DAILY_LIMIT = 5;    // free / anonymous users: 5 messages per UTC day
 var PRO_DAILY_LIMIT = 300;   // Pro users: effectively unlimited for real use, but bounds abuse of a compromised/shared account
 var MAX_INPUT_CHARS = 8000;  // per-message cost bound
@@ -30,7 +32,10 @@ export default async function handler(req, res) {
   try {
     var body = req.body || {};
     var messages = body.messages || [];
-    var userId = (body.userId || "").trim();
+    // Prefer the userId proven by a verified Clerk token; fall back to the
+    // client-supplied userId only when no valid token is present.
+    var verifiedId = await verifiedUserId(req);
+    var userId = verifiedId || (body.userId || "").trim();
 
     // Validate messages
     if (!messages || messages.length === 0) {
@@ -64,18 +69,30 @@ export default async function handler(req, res) {
     if (KV_URL && KV_TOKEN) {
       try {
         // Pro status is read server-side from KV — NEVER trusted from the client.
+        // Two Pro signals, both server-verified: the Clerk account (user_pro:<userId>)
+        // and a lifetime device (lifetime:<deviceId> === "1", same as stems.js) — the
+        // latter covers a lifetime user who hasn't signed into Clerk on this device.
         var isPro = false;
+        var proByDevice = false;
         if (userId) {
           var proR = await kv(["GET", "user_pro:" + userId]);
           isPro = !!(proR && proR.result);
         }
+        var deviceId = (body.deviceId || "").trim();
+        if (!isPro && deviceId) {
+          var lifeR = await kv(["GET", "lifetime:" + deviceId]);
+          if (lifeR && lifeR.result === "1") { isPro = true; proByDevice = true; }
+        }
         var cap = isPro ? PRO_DAILY_LIMIT : FREE_DAILY_LIMIT;
 
-        // Counter identity: the account (userId) when signed in, else the caller's IP.
+        // Counter identity: the account (userId) if signed in; else a verified lifetime
+        // device; else the caller's IP. Anonymous/free is keyed by IP (NOT the client
+        // deviceId), so rotating a fake deviceId can't reset the free daily quota.
         var xff = req.headers["x-forwarded-for"];
         var ip = xff ? String(xff).split(",")[0].trim() : (req.headers["x-real-ip"] || "unknown");
         var day = new Date().toISOString().slice(0, 10); // UTC day
-        rlKey = "chat_rl:" + (userId ? "u:" + userId : "ip:" + ip) + ":" + day;
+        var idKey = userId ? "u:" + userId : (proByDevice ? "d:" + deviceId : "ip:" + ip);
+        rlKey = "chat_rl:" + idKey + ":" + day;
 
         var incR = await kv(["INCR", rlKey]);
         var count = (incR && typeof incR.result === "number") ? incR.result : 1;
