@@ -339,7 +339,7 @@ function incrementChatUsage() {
   } catch(e) { return 1; }
 }
 
-function AIChatPage({ isPro, onUnlockClick }) {
+function AIChatPage({ isPro, onUnlockClick, user }) {
   var msgsState = useState([{
     role:"assistant",
     content:"Hi! I am your MixCheck AI audio assistant. Ask me anything about your livestream mix, EQ, compression, effects, or mixer settings. Tell me what mixer you use and what problem you are hearing for the best advice."
@@ -377,13 +377,17 @@ function AIChatPage({ isPro, onUnlockClick }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           messages: apiMessages,
-          isPro: isPro,
+          userId: (user && user.id) || undefined,
         }),
       });
 
       var data = await response.json();
 
       if (!response.ok || data.error) {
+        // Server-side daily limit reached — reflect it in the UI (source of truth is the server).
+        if (response.status === 429 && !isPro) {
+          setChatUsage(FREE_CHAT_LIMIT);
+        }
         setMsgs(function(prev) {
           return prev.concat([{ role:"assistant", content: data.error || "Something went wrong. Please try again." }]);
         });
