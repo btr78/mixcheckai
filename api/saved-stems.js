@@ -1,13 +1,16 @@
-// GET /api/saved-stems?userId=xxx — returns saved stems list for a user
+// GET /api/saved-stems — returns the signed-in user's saved stems list.
+// Account comes from the verified Clerk token only; a userId in the query is ignored.
+
+import { requireUserId } from "../lib/auth.js";
 
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "https://mixcheckai.com");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
   if (req.method === "OPTIONS") return res.status(200).end();
 
-  var userId = (req.query.userId || "").trim();
-  if (!userId) return res.status(400).json({ error: "Missing userId" });
+  var userId = await requireUserId(req, res);
+  if (!userId) return;
 
   var KV_URL   = process.env.KV_REST_API_URL;
   var KV_TOKEN = process.env.KV_REST_API_TOKEN;

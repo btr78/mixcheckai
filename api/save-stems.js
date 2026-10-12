@@ -2,24 +2,30 @@
 // Downloads each Replicate stem URL, uploads to Vercel Blob (permanent), saves ref in KV.
 
 import { put } from "@vercel/blob";
+import { requireUserId } from "../lib/auth.js";
 
 var MAX_SAVED = 20;
+
+// Only Replicate's own delivery host is fetched, so a caller can't use this
+// endpoint to pull an arbitrary URL and republish it on our Blob store.
+var ALLOWED_SOURCE = /^https:\/\/([a-z0-9-]+\.)*replicate\.(com|delivery)\//i;
 
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "https://mixcheckai.com");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).end();
 
   var body = req.body || {};
-  var userId   = (body.userId || "").trim();
+  var userId = await requireUserId(req, res);
+  if (!userId) return;
   var stemUrls = body.stemUrls || {};
   var fileName = body.fileName || "Recording";
   var date     = body.date || new Date().toISOString();
 
-  if (!userId || Object.keys(stemUrls).length === 0) {
-    return res.status(400).json({ error: "Missing userId or stemUrls" });
+  if (Object.keys(stemUrls).length === 0) {
+    return res.status(400).json({ error: "Missing stemUrls" });
   }
 
   var BLOB_TOKEN = process.env.BLOB_READ_WRITE_TOKEN;
@@ -32,7 +38,7 @@ export default async function handler(req, res) {
   for (var i = 0; i < tracks.length; i++) {
     var track = tracks[i][0];
     var url   = tracks[i][1];
-    if (!url) continue;
+    if (!url || !ALLOWED_SOURCE.test(String(url))) continue;
     try {
       var r = await fetch(url);
       if (!r.ok) continue;

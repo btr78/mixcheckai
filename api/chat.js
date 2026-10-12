@@ -11,7 +11,7 @@
 // the request body.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { verifiedUserId } from "../lib/auth.js";
+import { verifiedUserId, callerIp } from "../lib/auth.js";
 
 var FREE_DAILY_LIMIT = 5;    // free / anonymous users: 5 messages per UTC day
 var PRO_DAILY_LIMIT = 300;   // Pro users: effectively unlimited for real use, but bounds abuse of a compromised/shared account
@@ -32,10 +32,11 @@ export default async function handler(req, res) {
   try {
     var body = req.body || {};
     var messages = body.messages || [];
-    // Prefer the userId proven by a verified Clerk token; fall back to the
-    // client-supplied userId only when no valid token is present.
-    var verifiedId = await verifiedUserId(req);
-    var userId = verifiedId || (body.userId || "").trim();
+    // Identity for entitlement AND for the rate-limit counter comes from the
+    // verified Clerk token only. A client-supplied userId was previously trusted
+    // here, so sending a fresh random one per request reset the daily quota and
+    // made the free limit unenforceable.
+    var userId = await verifiedUserId(req);
 
     // Validate messages
     if (!messages || messages.length === 0) {
@@ -85,11 +86,10 @@ export default async function handler(req, res) {
         }
         var cap = isPro ? PRO_DAILY_LIMIT : FREE_DAILY_LIMIT;
 
-        // Counter identity: the account (userId) if signed in; else a verified lifetime
-        // device; else the caller's IP. Anonymous/free is keyed by IP (NOT the client
-        // deviceId), so rotating a fake deviceId can't reset the free daily quota.
-        var xff = req.headers["x-forwarded-for"];
-        var ip = xff ? String(xff).split(",")[0].trim() : (req.headers["x-real-ip"] || "unknown");
+        // Counter identity: the verified account if signed in; else a KV-verified
+        // lifetime device; else the caller's IP. Every one of those is either proven
+        // server-side or unrotatable, so no client value can reset the daily quota.
+        var ip = callerIp(req);
         var day = new Date().toISOString().slice(0, 10); // UTC day
         var idKey = userId ? "u:" + userId : (proByDevice ? "d:" + deviceId : "ip:" + ip);
         rlKey = "chat_rl:" + idKey + ":" + day;

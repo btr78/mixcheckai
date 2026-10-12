@@ -2,19 +2,25 @@
 // Master code: env var MASTER_PRO_CODE — lifetime, any device
 // Device-locked codes: stored in Vercel KV (Upstash), bound on first use
 
+import { verifiedUserId } from "../lib/auth.js";
+
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "https://mixcheckai.com");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
   if (req.method === "OPTIONS") return res.status(200).end();
 
   // ── Admin: seed a new code via GET or POST ───────────────────────────────────
+  // Seeding mints Pro codes, so it should not share a secret with the codes handed
+  // to customers. Set ADMIN_SEED_SECRET and it is required here; until it is set we
+  // keep accepting MASTER_PRO_CODE so the existing workflow does not break.
   var isSeedGet = req.method === "GET" && req.query._action === "seed";
   var isSeedPost = req.method === "POST" && (req.body || {})._action === "seed";
   if (isSeedGet || isSeedPost) {
     var seedParams = isSeedGet ? req.query : (req.body || {});
-    var masterCheck = (process.env.MASTER_PRO_CODE || "").trim().toUpperCase();
+    var seedSecret = (process.env.ADMIN_SEED_SECRET || "").trim().toUpperCase();
+    var masterCheck = seedSecret || (process.env.MASTER_PRO_CODE || "").trim().toUpperCase();
     var givenSecret = (seedParams.secret || "").trim().toUpperCase();
     if (!masterCheck || givenSecret !== masterCheck) return res.status(403).json({ error: "Forbidden — wrong secret" });
     var seedCode = (seedParams.code || "").trim().toUpperCase();
@@ -42,7 +48,10 @@ export default async function handler(req, res) {
   var body = req.body || {};
   var code = (body.code || "").trim().toUpperCase();
   var deviceId = (body.deviceId || "").trim();
-  var userId = (body.userId || "").trim();
+  // Only a proven account gets a Pro grant written to it. Previously this came
+  // from the request body, so naming someone else's userId both skipped code
+  // validation and wrote Pro onto their account.
+  var userId = await verifiedUserId(req);
   var isTrial = body.isTrial !== false;
 
   if (!code || !deviceId) {
@@ -62,11 +71,12 @@ export default async function handler(req, res) {
   };
 
   // Save Pro status to user account so it follows their login everywhere
-  var saveUserPro = async function(lifetime) {
+  var saveUserPro = async function(lifetime, expiresAtMs) {
     if (!userId || !KV_URL || !KV_TOKEN) return;
     try {
       await kvPost(["SET", "user_pro:" + userId, JSON.stringify({
-        isPro: true, lifetime: !!lifetime, code: code, activatedAt: new Date().toISOString()
+        isPro: true, lifetime: !!lifetime, code: code, activatedAt: new Date().toISOString(),
+        expiresAt: (!lifetime && expiresAtMs) ? new Date(expiresAtMs).toISOString() : null
       })]);
     } catch(e) {}
   };
@@ -125,7 +135,7 @@ export default async function handler(req, res) {
       if (isTrial) {
         await kvPost(["SET", "trial:" + deviceId, "1", "EX", durationSecs || 691200]);
       }
-      await saveUserPro(false);
+      await saveUserPro(false, expiresAt);
       return res.status(200).json({ ok: true, lifetime: false, expiresAt: expiresAt });
     }
 

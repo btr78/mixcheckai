@@ -3,17 +3,18 @@
 // POST /api/check-pro { action, ... }                   → single-device session enforcement
 //        action: "claim" | "heartbeat" | "release"  (userId, deviceId)
 //
-// Entitlement identity: if the request carries a valid Clerk session token
-// (Authorization: Bearer …), the verified userId from that token is used and the
-// client-supplied ?userId is ignored. Verification requires CLERK_SECRET_KEY; if
-// it's unset or the token is missing/invalid, we fall back to the client-supplied
-// userId (same trust level as the rest of the app) so nothing breaks before the
-// secret is configured — it only hardens once it is.
+// Entitlement identity comes from the verified Clerk token ONLY. A ?userId in the
+// query is ignored: naming someone else's userId used to return their Pro status
+// (and their activation code) to an unauthenticated caller.
+//
+// The one non-token signal still honoured is lifetime:<deviceId>, which is a
+// server-side KV lookup rather than a client assertion — it covers a lifetime
+// customer who hasn't signed into Clerk on this device.
 //
 // Single-device: newest device wins; previous device loses access on next heartbeat.
 // FAIL-OPEN: any error returns active:true so a bug never locks out a paying customer.
 
-import { verifiedUserId } from "../lib/auth.js";
+import { verifiedUserId, requireUserId } from "../lib/auth.js";
 import { CHEATSHEET_PRO } from "../lib/cheatsheet-data.js";
 
 var LOCK_TTL = 150; // seconds
@@ -39,8 +40,13 @@ export default async function handler(req, res) {
   if (req.method === "POST") {
     var body = req.body || {};
     var action = (body.action || "claim").trim();
-    var userId = (body.userId || "").trim();
     var deviceId = (body.deviceId || "").trim();
+    // claim/heartbeat displace whichever device currently holds Pro, so they need a
+    // proven account — otherwise knowing someone's userId was enough to kick them off.
+    // release only drops a lock this same device already holds and arrives via
+    // sendBeacon, which cannot set an Authorization header, so it stays token-optional.
+    var postVerified = await verifiedUserId(req);
+    var userId = postVerified || (action === "release" ? (body.userId || "").trim() : "");
     if (!userId || !deviceId || !KV_URL || !KV_TOKEN) return res.status(200).json({ ok: true, active: true });
 
     var key = "session_lock:" + userId;
@@ -86,8 +92,7 @@ export default async function handler(req, res) {
     if (!instrumentId || !CHEATSHEET_PRO[instrumentId]) {
       return res.status(400).json({ error: "Unknown instrument" });
     }
-    var effId = verified || (req.query.userId || "").trim();
-    var entitled = await isProId(effId);
+    var entitled = await isProId(verified);
     // Fallback: a lifetime device (same signal as stems.js) — covers a lifetime
     // user who hasn't signed into Clerk on this device.
     if (!entitled) {
@@ -112,8 +117,8 @@ export default async function handler(req, res) {
   }
 
   // ── GET: Pro status ─────────────────────────────────────────────────────────
-  var qUserId = verified || (req.query.userId || "").trim();
-  if (!qUserId) return res.status(400).json({ error: "Missing userId" });
+  var qUserId = verified;
+  if (!qUserId) return res.status(401).json({ error: "Sign in required" });
   if (!KV_URL || !KV_TOKEN) return res.status(200).json({ isPro: false });
 
   try {
@@ -121,11 +126,15 @@ export default async function handler(req, res) {
     if (!r.result) return res.status(200).json({ isPro: false });
     var data = {};
     try { data = JSON.parse(r.result); } catch (e) {}
+    // Honour an expiry when the grant carries one. Grants written before expiries
+    // existed have no expiresAt and stay valid, so no current customer is cut off.
+    if (data.expiresAt && Date.parse(data.expiresAt) < Date.now()) {
+      return res.status(200).json({ isPro: false, expired: true });
+    }
     return res.status(200).json({
       isPro: true,
       lifetime: !!data.lifetime,
       activatedAt: data.activatedAt || null,
-      code: data.code || null,
     });
   } catch (e) {
     return res.status(200).json({ isPro: false });

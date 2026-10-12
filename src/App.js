@@ -3,6 +3,24 @@ import { ClerkProvider, SignInButton, SignedIn, SignedOut, UserButton, useUser, 
 
 var CLERK_KEY = process.env.REACT_APP_CLERK_PUBLISHABLE_KEY || "";
 
+// ── AUTHENTICATED FETCH ───────────────────────────────────────────────────────
+// The API identifies the account from a verified Clerk token, never from a userId
+// in the request. Pages receive `user` as a prop but not Clerk's auth object, so
+// AppCore registers the token getter here and any call site can use authFetch.
+var __getClerkToken = null;
+function registerTokenGetter(fn) { __getClerkToken = fn; }
+async function authFetch(url, options) {
+  options = options || {};
+  var headers = Object.assign({}, options.headers || {});
+  try {
+    if (__getClerkToken) {
+      var t = await __getClerkToken();
+      if (t) headers.Authorization = "Bearer " + t;
+    }
+  } catch (e) {}
+  return fetch(url, Object.assign({}, options, { headers: headers }));
+}
+
 const STRIPE_PAYMENT_LINK = "https://buy.stripe.com/3cIcN6gBO375e6dbQkgbm03";
 const STRIPE_PAYMENT_LINK_NOTRIAL = "https://buy.stripe.com/dRmbJ271e9vte6d5rWgbm04"; // no-trial link — pay $9.99 today, unlimited stems immediately
 const STRIPE_CREDITS_LINK = "https://buy.stripe.com/3cI4gA85iePNaU1f2wgbm05"; // one-time $2.99 for 10 stem credits
@@ -179,7 +197,7 @@ function HistoryPage({ navigate, user }) {
 
   useEffect(function() {
     if (!user || !user.id) return;
-    fetch("/api/saved-stems?userId=" + encodeURIComponent(user.id))
+    authFetch("/api/saved-stems")
       .then(function(r) { return r.json(); })
       .then(function(d) { if (d.stems) setSavedStems(d.stems); })
       .catch(function() {});
@@ -187,7 +205,7 @@ function HistoryPage({ navigate, user }) {
 
   useEffect(function() {
     if (!user || !user.id) return;
-    fetch("/api/history?userId=" + encodeURIComponent(user.id))
+    authFetch("/api/history")
       .then(function(r) { return r.json(); })
       .then(function(d) {
         if (d.history && d.history.length > 0) {
@@ -202,7 +220,7 @@ function HistoryPage({ navigate, user }) {
     clearHistory();
     setHistory([]);
     if (user && user.id) {
-      fetch("/api/history", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ userId:user.id, entry:null, clear:true }) }).catch(function(){});
+      authFetch("/api/history", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ clear:true }) }).catch(function(){});
     }
   };
 
@@ -630,7 +648,7 @@ function usePro() {
       var deviceId = getDeviceId();
       var body = { code: code.trim().toUpperCase(), deviceId: deviceId };
       if (userId) body.userId = userId;
-      var resp = await fetch("/api/activate", {
+      var resp = await authFetch("/api/activate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -1552,7 +1570,6 @@ function CheatSheetPage({ mixer, instrument, isPro, onUnlockClick, onReset }) {
         var headers = {};
         if (token) headers.Authorization = "Bearer " + token;
         var qs = "resource=cheatsheet&instrument=" + encodeURIComponent(instrument.id);
-        if (auth.userId) qs += "&userId=" + encodeURIComponent(auth.userId);
         qs += "&deviceId=" + encodeURIComponent(getDeviceId());
         var r = await fetch("/api/check-pro?" + qs, { headers: headers });
         var d = await r.json().catch(function () { return {}; });
@@ -2095,7 +2112,7 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode, user }) {
       };
       saveToHistory(histEntry);
       if (user && user.id) {
-        fetch("/api/history", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ userId:user.id, entry:histEntry }) }).catch(function(){});
+        authFetch("/api/history", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ entry:histEntry }) }).catch(function(){});
       }
       if (!isPro) incrementUsage();
       setResults(finalR);
@@ -2171,10 +2188,10 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode, user }) {
       // Byte-slice for everyone — trial and paid — stays within Vercel body limit
       var stemBlob = file.size > STEM_BYTE_LIMIT ? file.slice(0, STEM_BYTE_LIMIT) : file;
       dataUrl = await readFileAsDataURL(stemBlob);
-      var resp = await fetch("/api/stems", {
+      var resp = await authFetch("/api/stems", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ audioBase64: dataUrl, deviceId: getDeviceId(), isTrial: trial.isTrial, creditsNeeded: creditsNeeded, userId: (user && user.id) || "" }),
+        body: JSON.stringify({ audioBase64: dataUrl, deviceId: getDeviceId(), isTrial: trial.isTrial, creditsNeeded: creditsNeeded }),
       });
       var data = await resp.json();
       if (!resp.ok) { errMsg = data.error || "Server error"; throw new Error(errMsg); }
@@ -2195,10 +2212,10 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode, user }) {
           var currentUser = userRef.current;
           if (currentUser && currentUser.id && sd.output) {
             setStemSaveStatus("saving");
-            fetch("/api/save-stems", {
+            authFetch("/api/save-stems", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ userId: currentUser.id, stemUrls: sd.output, fileName: file ? file.name : "Recording", date: new Date().toISOString() }),
+              body: JSON.stringify({ stemUrls: sd.output, fileName: file ? file.name : "Recording", date: new Date().toISOString() }),
             }).then(function(r) { return r.json(); })
               .then(function(d) { setStemSaveStatus(d.ok ? "saved" : "error"); })
               .catch(function() { setStemSaveStatus("error"); });
@@ -2453,10 +2470,10 @@ function AnalyzePage({ navigate, isPro, onUnlockClick, appMode, user }) {
       var STEM_BYTE_LIMIT = 3 * 1024 * 1024;
       var blob = file.size > STEM_BYTE_LIMIT ? file.slice(0, STEM_BYTE_LIMIT) : file;
       var dataUrl = await readFileAsDataURL(blob);
-      var resp = await fetch("/api/transcribe", {
+      var resp = await authFetch("/api/transcribe", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ audioBase64: dataUrl }),
+        body: JSON.stringify({ audioBase64: dataUrl, deviceId: getDeviceId() }),
       });
       var data = await resp.json();
       if (!resp.ok || !data.predictionId) throw new Error(data.error || "Failed to start");
@@ -3470,7 +3487,7 @@ function HomePage({ navigate, isPro, onUnlockClick }) {
     { num:"03", icon:"💡", title:"Follow one fix", desc:"Plain-English advice, one step at a time. Try it Sunday. Upload again. Watch your score climb." },
   ];
   var TRUST = [
-    { icon:"🔒", t:"Your audio never leaves your device" },
+    { icon:"🔒", t:"Mix analysis runs in your browser" },
     { icon:"📱", t:"Works on iPhone, Android, desktop" },
     { icon:"⚡", t:"Results in under 60 seconds" },
     { icon:"🆓", t:"Free to start — no credit card" },
@@ -3631,7 +3648,7 @@ function PricingPage({ navigate, isPro, onUnlockClick }) {
   var FAQ = [
     { q:"Do I need a credit card to try free?", a:"No. Just upload a file and go. No account needed for the free tier." },
     { q:"Can I cancel anytime?", a:"Yes. Cancel from your Stripe customer portal anytime with no questions." },
-    { q:"Is my audio stored on your servers?", a:"No. Files are analyzed entirely in your browser and never uploaded to our servers." },
+    { q:"Is my audio stored on your servers?", a:"Mix analysis happens entirely in your browser — that file is never uploaded. The optional stem separation and lyrics features do send the clip to our processing provider, and separated stems are saved to your account only if you ask us to."},
     { q:"I am a volunteer, not a professional. Is this for me?", a:"This is literally built for you. No audio degree required. Plain English only." },
     { q:"How do I unlock Pro after paying?", a:"After payment you receive an access code by email. Go to mixcheckai.com, tap Get Pro in the top menu, and enter your code." },
     { q:"Can it handle long recordings?", a:"Yes. The analyzer handles files up to 500MB and 2 hours long. For long recordings it analyzes key sections and gives you accurate measurements." },
@@ -3783,10 +3800,13 @@ function SuccessPage({ navigate, isPro, unlockPro }) {
             clearInterval(interval);
             setCode(data.code);
             try {
-              var actResp = await fetch("/api/activate", {
+              var actResp = await authFetch("/api/activate", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ code: data.code, deviceId: getDeviceId(), isTrial: data.isTrial !== false, userId: (unlockPro && user) ? user.id : undefined }),
+                // `user` was referenced here but is not a prop of SuccessPage, so building
+                // this body threw a ReferenceError that the empty catch below swallowed —
+                // activation never ran after payment. Identity now comes from the token.
+                body: JSON.stringify({ code: data.code, deviceId: getDeviceId(), isTrial: data.isTrial !== false }),
               });
               var actData = await actResp.json();
               if (actResp.ok && actData.ok) {
@@ -4074,6 +4094,10 @@ function AppCore({ user }) {
   var proResult = usePro();
   var isPro = proResult.isPro; var unlockPro = proResult.unlockPro; var setIsPro = proResult.setIsPro;
   var authObj = useAuth();
+  // Registered during render rather than in an effect: child effects run before
+  // parent effects, so a page's first API call would otherwise go out untokenised.
+  // Wrapped rather than passed bare so getToken keeps its receiver.
+  registerTokenGetter(authObj && authObj.getToken ? function() { return authObj.getToken(); } : null);
   var unlockState = useState(false); var showUnlock = unlockState[0]; var setShowUnlock = unlockState[1];
   var modeState = useState("church"); var appMode = modeState[0]; var setAppMode = modeState[1];
   // Single-device session: true = this device is the active one. Fail-open default true.
@@ -4085,7 +4109,7 @@ function AppCore({ user }) {
     var deviceId = getDeviceId();
     var cancelled = false;
     var post = function(action) {
-      return fetch("/api/check-pro", {
+      return authFetch("/api/check-pro", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId: user.id, deviceId: deviceId, action: action }),
       }).then(function(r) { return r.json(); }).catch(function() { return { ok: true, active: true }; });
@@ -4111,10 +4135,10 @@ function AppCore({ user }) {
       try {
         var stored = JSON.parse(localStorage.getItem("mca_pro_v2") || "{}");
         if (stored.code) {
-          fetch("/api/activate", {
+          authFetch("/api/activate", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ code: stored.code, deviceId: getDeviceId(), userId: user.id }),
+            body: JSON.stringify({ code: stored.code, deviceId: getDeviceId() }),
           }).catch(function() {});
         }
       } catch(e) {}
@@ -4122,11 +4146,7 @@ function AppCore({ user }) {
     }
     // Not Pro on this device — check if their account has Pro
     (async function() {
-    var token = null;
-    try { token = authObj.getToken ? await authObj.getToken() : null; } catch (e) {}
-    var headers = {};
-    if (token) headers.Authorization = "Bearer " + token;
-    fetch("/api/check-pro?userId=" + encodeURIComponent(user.id), { headers: headers })
+    authFetch("/api/check-pro")
       .then(function(r) { return r.json(); })
       .then(function(d) {
         if (d.isPro) {

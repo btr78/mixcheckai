@@ -1,11 +1,22 @@
-// GET  /api/history?userId=xxx  — returns cloud mix history for a user
-// POST /api/history             — { userId, entry } saves entry to cloud
+// GET  /api/history  — returns cloud mix history for the signed-in user
+// POST /api/history  — { entry } saves entry to cloud for the signed-in user
+//
+// The account is taken from the verified Clerk token ONLY. A userId in the query
+// or body is ignored, so one caller can never read, overwrite or clear another
+// user's history.
+
+import { requireUserId } from "../lib/auth.js";
 
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "https://mixcheckai.com");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
   if (req.method === "OPTIONS") return res.status(200).end();
+
+  // Identity first: an unauthenticated caller should be turned away before the
+  // handler reveals anything about server state.
+  var userId = await requireUserId(req, res);
+  if (!userId) return;
 
   var KV_URL = process.env.KV_REST_API_URL;
   var KV_TOKEN = process.env.KV_REST_API_TOKEN;
@@ -17,8 +28,6 @@ export default async function handler(req, res) {
   };
 
   if (req.method === "GET") {
-    var userId = (req.query.userId || "").trim();
-    if (!userId) return res.status(400).json({ error: "Missing userId" });
     var result = await kvPost(["GET", "history:" + userId]);
     var history = [];
     try { history = result.result ? JSON.parse(result.result) : []; } catch(e) {}
@@ -27,9 +36,8 @@ export default async function handler(req, res) {
 
   if (req.method === "POST") {
     var body = req.body || {};
-    var userId = (body.userId || "").trim();
     var entry = body.entry;
-    if (!userId || !entry) return res.status(400).json({ error: "Missing userId or entry" });
+    if (!entry && !body.clear) return res.status(400).json({ error: "Missing entry" });
     if (body.clear) {
       await kvPost(["DEL", "history:" + userId]);
       return res.status(200).json({ ok: true, cleared: true });

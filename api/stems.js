@@ -1,6 +1,8 @@
 // Stem separation via Replicate Demucs model
 // Accepts base64 audio, starts prediction, returns predictionId for polling
 
+import { verifiedUserId, callerIp } from "../lib/auth.js";
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
@@ -8,13 +10,13 @@ export default async function handler(req, res) {
 
   res.setHeader("Access-Control-Allow-Origin", "https://mixcheckai.com");
   res.setHeader("Access-Control-Allow-Methods", "POST");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
   try {
-    var body = req.body;
+    var body = req.body || {};
     var audioBase64 = body.audioBase64;
     var deviceId = (body.deviceId || "").trim();
-    var userId = (body.userId || "").trim();
+    var userId = await verifiedUserId(req);
     var isTrial = !!body.isTrial;
     // Credits to deduct: 1 per 5 min of audio (client calculates, server validates)
     var creditsNeeded = Math.max(1, Math.min(20, parseInt(body.creditsNeeded || "1", 10)));
@@ -52,30 +54,38 @@ export default async function handler(req, res) {
       } catch (e) { /* fail open — never block on infra error */ }
     }
 
-    if (deviceId && KV_URL && KV_TOKEN) {
+    if (KV_URL && KV_TOKEN) {
       var kvPost = async function(cmd) {
         var r = await fetch(KV_URL, { method:"POST", headers:{ "Authorization":"Bearer "+KV_TOKEN, "Content-Type":"application/json" }, body:JSON.stringify(cmd) });
         return r.json();
       };
 
-      // Lifetime devices skip all limits
-      var lifetimeResult = await kvPost(["GET", "lifetime:" + deviceId]);
-      var isLifetime = lifetimeResult.result === "1";
+      // Lifetime devices skip all limits (server-side KV flag, not a client claim)
+      var isLifetime = false;
+      if (deviceId) {
+        var lifetimeResult = await kvPost(["GET", "lifetime:" + deviceId]);
+        isLifetime = lifetimeResult.result === "1";
+      }
 
       if (!isLifetime) {
+        // Quota identity: the supplied device (keeps every existing balance and
+        // purchased credit intact), else the caller's IP. This whole block used to
+        // sit behind `if (deviceId ...)`, so simply omitting deviceId bought
+        // unlimited GPU separations.
+        var quotaId = deviceId || ("ip:" + callerIp(req));
         if (isTrial) {
           // Trial: max 3 total regardless of file length (client byte-slices to ~3 min)
-          var trialCount = parseInt((await kvPost(["GET", "stems:" + deviceId])).result || "0", 10);
+          var trialCount = parseInt((await kvPost(["GET", "stems:" + quotaId])).result || "0", 10);
           if (trialCount >= 3) {
             return res.status(403).json({ error: "You've used all 3 trial stem separations. Unlimited monthly access starts when your trial converts to a paid subscription." });
           }
-          await kvPost(["SET", "stems:" + deviceId, String(trialCount + 1), "EX", 691200]);
+          await kvPost(["SET", "stems:" + quotaId, String(trialCount + 1), "EX", 691200]);
         } else {
           // Paid subscriber: deduct creditsNeeded from monthly quota + bonus credits
           var month = new Date().toISOString().slice(0, 7);
-          var monthKey = "stems_monthly:" + deviceId + ":" + month;
+          var monthKey = "stems_monthly:" + quotaId + ":" + month;
           var monthlyUsed = parseInt((await kvPost(["GET", monthKey])).result || "0", 10);
-          var credits = parseInt((await kvPost(["GET", "stems_credits:" + deviceId])).result || "0", 10);
+          var credits = parseInt((await kvPost(["GET", "stems_credits:" + quotaId])).result || "0", 10);
 
           var monthlyRemaining = Math.max(0, MONTHLY_LIMIT - monthlyUsed);
           var totalAvailable = monthlyRemaining + credits;
@@ -100,7 +110,7 @@ export default async function handler(req, res) {
             monthlyUsed = monthlyUsed + fromMonthly;
           }
           if (fromBonus > 0) {
-            await kvPost(["DECRBY", "stems_credits:" + deviceId, fromBonus]);
+            await kvPost(["DECRBY", "stems_credits:" + quotaId, fromBonus]);
             credits = credits - fromBonus;
           }
           // Attach balance to response
