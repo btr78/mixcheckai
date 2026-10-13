@@ -3476,11 +3476,6 @@ function HomePage({ navigate, isPro, onUnlockClick }) {
     { icon:"😤", text:"\"You can't tell if the livestream sounds different than the room — until someone texts you mid-service.\"" },
     { icon:"😓", text:"\"You're not a sound engineer. You're a volunteer. Nobody ever showed you what 'good' actually sounds like.\"" },
   ];
-  var TESTIMONIALS = [
-    { name:"Marcus T.", role:"Sound Tech · Grace Community Church", body:"I've been running sound for 3 years and always guessed at EQ. MixCheck told me my low end was the problem in 60 seconds. Fixed it that Sunday.", stars:5 },
-    { name:"Sarah K.", role:"Volunteer · Hillside Baptist", body:"Our livestream kept sounding thin and we didn't know why. Turns out our stereo width was too narrow. The advice was so simple I felt silly for not knowing.", stars:5 },
-    { name:"Derek R.", role:"Worship Team Lead · New Hope Church", body:"Went from a 54 score to 81 in three Sundays. Having a number to chase every week changed everything for our team.", stars:5 },
-  ];
   var STEPS = [
     { num:"01", icon:"🎙", title:"Upload your recording", desc:"MP3, WAV, or AAC from your livestream or soundcheck. No account needed. Takes under 5 seconds." },
     { num:"02", icon:"📊", title:"Get your Mix Score", desc:"Real measurements — loudness, clarity, low-end balance, stereo width. A number from 0–100 with honest feedback." },
@@ -3558,32 +3553,6 @@ function HomePage({ navigate, isPro, onUnlockClick }) {
                   <div style={{ fontSize:34, marginBottom:18 }}>{s.icon}</div>
                   <h3 style={{ fontSize:17, fontWeight:800, margin:"0 0 10px", color:"#fff" }}>{s.title}</h3>
                   <p style={{ fontSize:13, color:"#6b7280", lineHeight:1.7, margin:0, fontFamily:"sans-serif" }}>{s.desc}</p>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </section>
-
-      {/* ── SOCIAL PROOF ── */}
-      <section style={{ padding:"80px 20px", background:"#060810" }}>
-        <div style={{ maxWidth:960, margin:"0 auto" }}>
-          <div style={{ textAlign:"center", marginBottom:48 }}>
-            <div style={{ fontSize:10, letterSpacing:4, color:"#4a7cff", fontFamily:"monospace", fontWeight:700, marginBottom:14 }}>WHAT VOLUNTEERS SAY</div>
-            <h2 style={{ fontSize:"clamp(24px,4vw,38px)", fontWeight:900, margin:0, letterSpacing:-1.5, color:"#fff" }}>Real churches. Real improvement.</h2>
-          </div>
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))", gap:18 }}>
-            {TESTIMONIALS.map(function(t,i) {
-              return (
-                <div key={i} style={{ background:"#0d1017", border:"1px solid #1a1f2e", borderRadius:16, padding:"24px 22px" }}>
-                  <div style={{ display:"flex", gap:2, marginBottom:14 }}>
-                    {[1,2,3,4,5].map(function(s) { return <span key={s} style={{ color:"#f59e0b", fontSize:14 }}>★</span>; })}
-                  </div>
-                  <p style={{ fontSize:13, color:"#9ca3af", lineHeight:1.7, fontFamily:"sans-serif", fontStyle:"italic", margin:"0 0 18px" }}>"{t.body}"</p>
-                  <div style={{ borderTop:"1px solid #1a1f2e", paddingTop:14 }}>
-                    <div style={{ fontSize:13, fontWeight:700, color:"#e8eaf0", fontFamily:"sans-serif" }}>{t.name}</div>
-                    <div style={{ fontSize:11, color:"#4a7cff", fontFamily:"sans-serif", marginTop:2 }}>{t.role}</div>
-                  </div>
                 </div>
               );
             })}
