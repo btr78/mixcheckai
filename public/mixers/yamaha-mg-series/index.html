@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Yamaha MG Series livestream audio settings for church streams | MixCheck AI</title>
+<meta name="description" content="How to set up a Yamaha MG Series for church livestream audio: which output to send to the stream, the loudness target to aim for, and the faults that most often make a stream sound thin or quiet.">
+<link rel="canonical" href="https://mixcheckai.com/mixers/yamaha-mg-series/">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Yamaha MG Series livestream audio settings for church streams | MixCheck AI">
+<meta property="og:description" content="How to set up a Yamaha MG Series for church livestream audio: which output to send to the stream, the loudness target to aim for, and the faults that most often make a stream sound thin or quiet.">
+<meta property="og:url" content="https://mixcheckai.com/mixers/yamaha-mg-series/">
+<meta property="og:site_name" content="MixCheck AI">
+<meta name="theme-color" content="#00e5a0">
+<link rel="icon" href="/favicon.ico">
+<style>*{box-sizing:border-box}
+body{margin:0;background:#07090f;color:#e8eaf0;font:16px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;-webkit-text-size-adjust:100%}
+a{color:#00e5a0}
+.wrap{max-width:720px;margin:0 auto;padding:0 20px}
+header{border-bottom:1px solid #1a1f2e;padding:18px 0}
+header .wrap{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.logo{font-weight:800;color:#fff;text-decoration:none;font-size:17px}
+.logo span{color:#00e5a0}
+.cta{background:#00e5a0;color:#07090f;font-weight:700;text-decoration:none;padding:9px 16px;border-radius:9px;font-size:14px;white-space:nowrap}
+h1{font-size:clamp(26px,5vw,38px);line-height:1.2;letter-spacing:-1px;color:#fff;margin:40px 0 10px}
+h2{font-size:21px;color:#fff;margin:38px 0 10px;letter-spacing:-.3px}
+.kicker{font:700 11px/1 ui-monospace,monospace;letter-spacing:3px;color:#4a7cff;text-transform:uppercase;margin-top:40px}
+.lede{color:#9ca3af;font-size:17px}
+.card{background:#0d1017;border:1px solid #1a1f2e;border-radius:14px;padding:18px 20px;margin:18px 0}
+.card dt{font:700 11px/1 ui-monospace,monospace;letter-spacing:2px;color:#6b7280;text-transform:uppercase}
+.card dd{margin:6px 0 0;font-size:19px;font-weight:700;color:#00e5a0}
+table{width:100%;border-collapse:collapse;margin:16px 0;font-size:15px}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid #1a1f2e}
+th{color:#6b7280;font:700 11px/1 ui-monospace,monospace;letter-spacing:1.5px;text-transform:uppercase}
+td:first-child{color:#fff;font-weight:600;white-space:nowrap}
+ul{padding-left:20px}li{margin:9px 0;color:#c7cbd4}
+.q{font-weight:700;color:#fff;margin-top:20px}
+.panel{background:#0d1017;border:1px solid #00e5a0;border-radius:16px;padding:26px 22px;margin:44px 0;text-align:center}
+.panel h2{margin:0 0 8px}
+.panel p{color:#9ca3af;margin:0 0 18px;font-size:15px}
+.others{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 0;padding:0;list-style:none}
+.others li{margin:0}
+.others a{display:inline-block;background:#0d1017;border:1px solid #1a1f2e;border-radius:8px;padding:7px 12px;font-size:13px;text-decoration:none;color:#c7cbd4}
+footer{border-top:1px solid #1a1f2e;margin-top:56px;padding:26px 0 44px;color:#4a5568;font-size:13px}
+@media(max-width:480px){.wrap{padding:0 16px}td,th{padding:9px 8px}td:first-child{white-space:normal}}</style>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Which output should I send to the stream on a Yamaha MG Series?","acceptedAnswer":{"@type":"Answer","text":"Most churches use 2TR Out. The important part is that it is a separate feed from the main mix going to the room, so you can balance it for headphones and phone speakers without changing what the congregation hears."}},{"@type":"Question","name":"Why does our MG Series stream sound quieter than other videos?","acceptedAnswer":{"@type":"Answer","text":"Almost always because the stream is sitting well below -16 LUFS. Platforms normalise loudness, so a quiet stream stays quiet next to everything else in the viewer's feed. Measure the recording before changing anything — guessing at the master fader usually overshoots."}},{"@type":"Question","name":"Why does the stream sound thin when the room sounds full?","acceptedAnswer":{"@type":"Answer","text":"The room gives you drums, bass and congregational singing acoustically, so they never pass through the desk at full level. A viewer hears only what you send. Instruments that need no reinforcement live almost always need more level in the stream mix."}}]}</script>
+</head>
+<body>
+<header><div class="wrap">
+  <a class="logo" href="/">MixCheck <span>AI</span></a>
+  <a class="cta" href="/#analyze">Analyze your mix free</a>
+</div></header>
+<main class="wrap">
+
+<div class="kicker">Yamaha · Analog console</div>
+<h1>Yamaha MG Series: livestream audio settings</h1>
+<p class="lede">A practical starting point for getting a watchable stream out of a Yamaha MG Series — written for volunteers, not engineers.</p>
+
+<div class="card"><dl>
+  <dt>Usual stream output</dt><dd>2TR Out</dd>
+</dl></div>
+
+<h2>Send the stream its own mix</h2>
+<p>The Yamaha MG Series is an analog desk, so you do not have a spare mix bus to spend. <strong>2TR Out</strong> is the output most churches use to feed the stream.</p>
+<p>This is the single change that fixes the most streams. A mix balanced for a room is not a mix that works in headphones, because the room is already supplying what the desk is not.</p>
+
+<h2>Numbers worth aiming at</h2>
+<table>
+  <tr><th>What</th><th>Target</th><th>Why</th></tr>
+  <tr><td>Loudness</td><td>-16 LUFS</td><td>Roughly where streaming platforms normalise. Below about -20 LUFS viewers reach for the volume.</td></tr>
+  <tr><td>True peak</td><td>-6 to -3 dBFS</td><td>Leaves headroom so the loud moment of the last song does not distort.</td></tr>
+  <tr><td>Dynamic range</td><td>8-14 dB</td><td>Controlled but still alive. Under about 4 dB the mix sounds flat and tiring.</td></tr>
+</table>
+
+<h2>The faults that come up most</h2>
+<ul>
+  <li><strong>Streaming the FOH mix.</strong> Covered above, and worth the effort to separate.</li>
+  <li><strong>No high-pass filter.</strong> Rumble, handling noise and air conditioning build up across open channels. High-pass everything except kick and bass.</li>
+  <li><strong>No limiter on the stream output.</strong> One loud moment clips the whole broadcast.</li>
+  <li><strong>Riding gain during the service.</strong> Set gain structure at soundcheck; use faders during.</li>
+  <li><strong>Never checking in mono.</strong> Most viewers watch on a phone speaker, which is mono. Anything that disappears in mono is a problem your congregation will hear and you will not.</li>
+</ul>
+
+<h2>Common questions</h2>
+<p class="q">Which output should I send to the stream on a Yamaha MG Series?</p><p>Most churches use 2TR Out. The important part is that it is a separate feed from the main mix going to the room, so you can balance it for headphones and phone speakers without changing what the congregation hears.</p>
+<p class="q">Why does our MG Series stream sound quieter than other videos?</p><p>Almost always because the stream is sitting well below -16 LUFS. Platforms normalise loudness, so a quiet stream stays quiet next to everything else in the viewer's feed. Measure the recording before changing anything — guessing at the master fader usually overshoots.</p>
+<p class="q">Why does the stream sound thin when the room sounds full?</p><p>The room gives you drums, bass and congregational singing acoustically, so they never pass through the desk at full level. A viewer hears only what you send. Instruments that need no reinforcement live almost always need more level in the stream mix.</p>
+
+<div class="panel">
+  <h2>Stop guessing at it</h2>
+  <p>Upload a recording of your stream and get the actual numbers — loudness, peak, dynamics, stereo width — plus what to change. Free, no account needed, and the file never leaves your browser.</p>
+  <a class="cta" href="/#analyze">Analyze your MG Series mix</a>
+</div>
+
+<h2>Other mixers</h2>
+<ul class="others">
+  <li><a href="/mixers/allen-heath-qu-24/">Allen &amp; Heath QU-24</a></li>
+  <li><a href="/mixers/allen-heath-qu-16/">Allen &amp; Heath QU-16</a></li>
+  <li><a href="/mixers/allen-heath-qu-32/">Allen &amp; Heath QU-32</a></li>
+  <li><a href="/mixers/allen-heath-sq-5/">Allen &amp; Heath SQ-5</a></li>
+  <li><a href="/mixers/allen-heath-sq-6/">Allen &amp; Heath SQ-6</a></li>
+  <li><a href="/mixers/allen-heath-zed-10/">Allen &amp; Heath ZED-10</a></li>
+  <li><a href="/mixers/behringer-x32/">Behringer X32</a></li>
+  <li><a href="/mixers/behringer-x32-compact/">Behringer X32 Compact</a></li>
+  <li><a href="/mixers/behringer-xr18/">Behringer XR18</a></li>
+  <li><a href="/mixers/behringer-xenyx/">Behringer Xenyx</a></li>
+  <li><a href="/mixers/yamaha-tf1/">Yamaha TF1</a></li>
+  <li><a href="/mixers/yamaha-tf3-tf5/">Yamaha TF3/TF5</a></li>
+  <li><a href="/mixers/yamaha-ql1-ql5/">Yamaha QL1/QL5</a></li>
+  <li><a href="/mixers/midas-m32/">Midas M32</a></li>
+  <li><a href="/mixers/presonus-studiolive/">PreSonus StudioLive</a></li>
+  <li><a href="/mixers/soundcraft-efx/">Soundcraft EFX</a></li>
+  <li><a href="/mixers/mackie-profx/">Mackie ProFX</a></li>
+</ul>
+
+</main>
+<footer><div class="wrap">
+  <p>MixCheck AI — loudness and mix analysis for church and studio livestreams.<br>
+  Questions: <a href="mailto:hello@mixcheckai.com">hello@mixcheckai.com</a></p>
+</div></footer>
+</body>
+</html>

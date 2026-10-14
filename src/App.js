@@ -822,6 +822,12 @@ function Footer({ navigate }) {
           {[["home","Home"],["pricing","Pricing"],["analyze","Analyze Free"],["about","About Us"]].map(function(item) {
             return <button key={item[0]} onClick={function() { navigate(item[0]); }} style={{ background:"none", border:"none", cursor:"pointer", fontSize:12, color:"#4a5568", fontFamily:"sans-serif" }}>{item[1]}</button>;
           })}
+          {/* Real URL, not a router call — /mixers/ is a set of static pages, which is
+              what makes them crawlable. Linking from here is how they get discovered. */}
+          <a href="/mixers/"
+            style={{ fontSize:12, color:"#4a5568", fontFamily:"sans-serif", textDecoration:"none" }}>
+            Mixer Guides
+          </a>
           <a href={STRIPE_PORTAL_LINK} target="_blank" rel="noopener noreferrer"
             style={{ fontSize:12, color:"#4a5568", fontFamily:"sans-serif", textDecoration:"none" }}>
             Manage Subscription
